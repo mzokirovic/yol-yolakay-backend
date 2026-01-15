@@ -7,7 +7,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Supabase ulanishi
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_ANON_KEY
@@ -15,7 +14,6 @@ const supabase = createClient(
 
 // 1. Safarlarni olish va QIDIRISH (GET)
 app.get('/api/trips', async (req, res) => {
-    // Androiddan keladigan qidiruv parametrlarini olamiz
     const { from, to } = req.query; 
 
     try {
@@ -24,20 +22,31 @@ app.get('/api/trips', async (req, res) => {
             .select('*')
             .order('created_at', { ascending: false });
 
-        // Agar "from" (qayerdan) yozilgan bo'lsa, filtr qo'shamiz
         if (from) {
             query = query.ilike('from_city', `%${from}%`);
         }
         
-        // Agar "to" (qayerga) yozilgan bo'lsa, filtr qo'shamiz
         if (to) {
             query = query.ilike('to_city', `%${to}%`);
         }
 
         const { data, error } = await query;
-
         if (error) throw error;
-        res.json(data);
+
+        // ✅ SENIOR QISMI: Android TripDto modeliga moslab qaytaramiz
+        // Bu mapping Android tomonda crash bo'lishini oldini oladi
+        const formattedData = data.map(t => ({
+            id: t.id,
+            start_point: t.from_city,  // Android start_point kutmoqda
+            end_point: t.to_city,      // Android end_point kutmoqda
+            trip_date: t.departure_time,
+            available_seats: t.available_seats,
+            price: t.price,
+            driver_name: t.driver_name,
+            car_model: t.car_model
+        }));
+
+        res.json(formattedData);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -45,17 +54,23 @@ app.get('/api/trips', async (req, res) => {
 
 // 2. Yangi safar qo'shish (POST)
 app.post('/api/trips', async (req, res) => {
+    // Androiddan kelayotgan start_point va end_point-ni bazadagi from_city va to_city-ga o'giramiz
     const { 
-        driver_name, from_city, to_city, 
-        departure_time, price, available_seats, car_model 
+        driver_name, start_point, end_point, 
+        trip_date, price, available_seats, car_model 
     } = req.body;
 
     try {
         const { data, error } = await supabase
             .from('trips')
             .insert([{ 
-                driver_name, from_city, to_city, 
-                departure_time, price, available_seats, car_model 
+                driver_name, 
+                from_city: start_point, // Mapping
+                to_city: end_point,     // Mapping
+                departure_time: trip_date, 
+                price, 
+                available_seats, 
+                car_model 
             }])
             .select();
 
@@ -66,7 +81,6 @@ app.post('/api/trips', async (req, res) => {
     }
 });
 
-// Serverni ishga tushirish
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server ${PORT}-portda ishga tushdi!`);
