@@ -14,7 +14,6 @@ const supabase = createClient(
 
 // 1. Safarlarni olish (GET)
 app.get('/api/trips', async (req, res) => {
-    console.log("GET so'rovi keldi..."); // Debug uchun
     const { from, to } = req.query; 
 
     try {
@@ -29,14 +28,15 @@ app.get('/api/trips', async (req, res) => {
         const { data, error } = await query;
         if (error) throw error;
 
-        // ✅ ANDROID TripDto BILAN 100% MOSLASHTIRISH
+        // ✅ ANDROID MODELI BILAN 100% SINXRONIZATSIYA
         const formattedData = data.map(t => ({
             id: t.id.toString(),
-            driverName: t.driver_name,      // Kotlin CamelCase-ga mos
-            startPoint: t.from_city,        // Kotlin CamelCase-ga mos
-            endPoint: t.to_city,            // Kotlin CamelCase-ga mos
+            driverName: t.driver_name,      
+            phoneNumber: t.phone_number || "+998901234567", // Yangi maydon qo'shildi
+            startPoint: t.from_city,        
+            endPoint: t.to_city,            
             tripDate: t.departure_time,
-            availableSeats: t.available_seats,
+            availableSeats: parseInt(t.available_seats),
             price: parseFloat(t.price),
             carModel: t.car_model || ""
         }));
@@ -50,11 +50,9 @@ app.get('/api/trips', async (req, res) => {
 
 // 2. Yangi safar qo'shish (POST)
 app.post('/api/trips', async (req, res) => {
-    console.log("POST so'rovi keldi:", req.body); // Kelayotgan ma'lumotni logda ko'ramiz
-
-    // Androiddan kelayotgan maydon nomlarini qabul qilamiz
+    // Androiddan kelayotgan CamelCase nomlarni qabul qilamiz
     const { 
-        driverName, startPoint, endPoint, 
+        driverName, phoneNumber, startPoint, endPoint, 
         tripDate, price, availableSeats, carModel 
     } = req.body;
 
@@ -63,6 +61,7 @@ app.post('/api/trips', async (req, res) => {
             .from('trips')
             .insert([{ 
                 driver_name: driverName, 
+                phone_number: phoneNumber, // Bazaga saqlash
                 from_city: startPoint, 
                 to_city: endPoint, 
                 departure_time: tripDate, 
@@ -73,7 +72,6 @@ app.post('/api/trips', async (req, res) => {
             .select();
 
         if (error) throw error;
-        console.log("Safar bazaga saqlandi:", data[0]);
         res.status(201).json(data[0]);
     } catch (err) {
         console.error("POST Xatosi:", err.message);
@@ -83,5 +81,5 @@ app.post('/api/trips', async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server ${PORT}-portda ishga tushdi!`);
+    console.log(`Server running on port ${PORT}`);
 });
