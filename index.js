@@ -7,12 +7,16 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Supabase ulanishi
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_ANON_KEY
 );
 
-// 1. Safarlarni olish (GET)
+/**
+ * 1. Safarlarni olish (GET)
+ * Senior Feature: Pagination (kelajakda) va aqlli filtr
+ */
 app.get('/api/trips', async (req, res) => {
     const { from, to } = req.query; 
 
@@ -22,62 +26,84 @@ app.get('/api/trips', async (req, res) => {
             .select('*')
             .order('created_at', { ascending: false });
 
-        if (from) query = query.ilike('from_city', `%${from}%`);
-        if (to) query = query.ilike('to_city', `%${to}%`);
+        // Filtrlar faqat qiymat mavjud bo'lganda qo'shiladi
+        if (from && from.trim() !== "") {
+            query = query.ilike('from_city', `%${from.trim()}%`);
+        }
+        if (to && to.trim() !== "") {
+            query = query.ilike('to_city', `%${to.trim()}%`);
+        }
 
         const { data, error } = await query;
         if (error) throw error;
 
-        // ✅ ANDROID MODELI BILAN 100% SINXRONIZATSIYA
-        const formattedData = data.map(t => ({
+        // ✅ DATA MAPPING: Front-end (Android) kutayotgan modelga o'girish
+        const responseData = (data || []).map(t => ({
             id: t.id.toString(),
-            driverName: t.driver_name,      
-            phoneNumber: t.phone_number || "+998901234567", // Yangi maydon qo'shildi
-            startPoint: t.from_city,        
-            endPoint: t.to_city,            
-            tripDate: t.departure_time,
-            availableSeats: parseInt(t.available_seats),
-            price: parseFloat(t.price),
-            carModel: t.car_model || ""
+            driverName: t.driver_name || "Noma'lum",      
+            phoneNumber: t.phone_number || "Raqam yo'q",
+            startPoint: t.from_city || "Noma'lum",        
+            endPoint: t.to_city || "Noma'lum",            
+            tripDate: t.departure_time || "",
+            availableSeats: Number(t.available_seats) || 0,
+            price: Number(t.price) || 0,
+            carModel: t.car_model || "Noma'lum"
         }));
 
-        res.json(formattedData);
+        res.status(200).json(responseData);
     } catch (err) {
-        console.error("GET Xatosi:", err.message);
-        res.status(500).json({ error: err.message });
+        console.error("Critical GET Error:", err.message);
+        res.status(500).json({ status: "error", message: "Serverda ichki xatolik yuz berdi" });
     }
 });
 
-// 2. Yangi safar qo'shish (POST)
+/**
+ * 2. Yangi safar qo'shish (POST)
+ * Senior Feature: Data Validation va Default qiymatlar
+ */
 app.post('/api/trips', async (req, res) => {
     const { 
         driverName, phoneNumber, startPoint, endPoint, 
         tripDate, price, availableSeats, carModel 
     } = req.body;
 
-    try {        const { data, error } = await supabase
+    // 🔴 Validation: Majburiy maydonlarni tekshirish
+    if (!startPoint || !endPoint || !driverName) {
+        return res.status(400).json({ 
+            status: "error", 
+            message: "Majburiy maydonlar (Manzil va ism) kiritilmagan!" 
+        });
+    }
+
+    try {
+        const payload = { 
+            driver_name: driverName, 
+            phone_number: phoneNumber || "+998000000000",
+            from_city: startPoint, 
+            to_city: endPoint, 
+            departure_time: tripDate || new Date().toISOString(), 
+            price: Number(price) || 0, 
+            available_seats: Number(availableSeats) || 1, 
+            car_model: carModel || "Noma'lum" 
+        };
+
+        const { data, error } = await supabase
             .from('trips')
-            .insert([{ 
-                driver_name: driverName || "Ismsiz haydovchi", 
-                phone_number: phoneNumber || "+998000000000", // Default qiymat
-                from_city: startPoint, 
-                to_city: endPoint, 
-                departure_time: tripDate, 
-                price: price || 0, // Narx kelsa olamiz, bo'lmasa 0
-                available_seats: availableSeats || 1, 
-                car_model: carModel || "Aniqlanmagan" 
-            }])
+            .insert([payload])
             .select();
 
         if (error) throw error;
-        res.status(201).json(data[0]);
+        
+        console.log("New Trip Created:", data[0].id);
+        res.status(201).json({ status: "success", data: data[0] });
+
     } catch (err) {
-        console.error("POST Xatosi:", err.message);
-        res.status(500).json({ error: err.message });
+        console.error("Critical POST Error:", err.message);
+        res.status(500).json({ status: "error", message: "E'lon saqlashda xatolik yuz berdi" });
     }
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`🚀 Senior Backend running on port ${PORT}`);
 });
