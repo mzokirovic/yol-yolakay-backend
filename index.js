@@ -50,24 +50,22 @@ app.get('/api/trips', async (req, res) => {
 
 // 2. Yangi safar qo'shish (POST)
 app.post('/api/trips', async (req, res) => {
-    // Androiddan kelayotgan CamelCase nomlarni qabul qilamiz
     const { 
         driverName, phoneNumber, startPoint, endPoint, 
         tripDate, price, availableSeats, carModel 
     } = req.body;
 
-    try {
-        const { data, error } = await supabase
+    try {        const { data, error } = await supabase
             .from('trips')
             .insert([{ 
-                driver_name: driverName, 
-                phone_number: phoneNumber, // Bazaga saqlash
+                driver_name: driverName || "Ismsiz haydovchi", 
+                phone_number: phoneNumber || "+998000000000", // Default qiymat
                 from_city: startPoint, 
                 to_city: endPoint, 
                 departure_time: tripDate, 
-                price: price, 
-                available_seats: availableSeats, 
-                car_model: carModel 
+                price: price || 0, // Narx kelsa olamiz, bo'lmasa 0
+                available_seats: availableSeats || 1, 
+                car_model: carModel || "Aniqlanmagan" 
             }])
             .select();
 
