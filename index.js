@@ -61,27 +61,31 @@ app.get('/api/trips', async (req, res) => {
  * 2. Yangi safar qo'shish (POST)
  * Senior Feature: Data Validation va Default qiymatlar
  */
+/**
+ * 2. Yangi safar qo'shish (POST)
+ */
 app.post('/api/trips', async (req, res) => {
-    const { 
-        driverName, phoneNumber, startPoint, endPoint, 
+    // Android'dan kelayotgan maydonlar (driverId qo'shildi)
+    const {        driverId, driverName, phoneNumber, startPoint, endPoint, 
         tripDate, price, availableSeats, carModel 
     } = req.body;
 
-    // 🔴 Validation: Majburiy maydonlarni tekshirish
+    // 🔴 Validation
     if (!startPoint || !endPoint || !driverName) {
         return res.status(400).json({ 
             status: "error", 
-            message: "Majburiy maydonlar (Manzil va ism) kiritilmagan!" 
+            message: "Majburiy maydonlar kiritilmagan!" 
         });
     }
 
     try {
         const payload = { 
+            // driver_id: driverId || "anonymous", // Supabase'da bu ustun bo'lsa yoqing
             driver_name: driverName, 
             phone_number: phoneNumber || "+998000000000",
             from_city: startPoint, 
             to_city: endPoint, 
-            departure_time: tripDate || new Date().toISOString(), 
+            departure_time: tripDate, // Android yuborgan stringni o'zi
             price: Number(price) || 0, 
             available_seats: Number(availableSeats) || 1, 
             car_model: carModel || "Noma'lum" 
@@ -92,14 +96,16 @@ app.post('/api/trips', async (req, res) => {
             .insert([payload])
             .select();
 
-        if (error) throw error;
+        if (error) {
+            console.error("Supabase Insert Error:", error.message);
+            throw error;
+        }
         
-        console.log("New Trip Created:", data[0].id);
         res.status(201).json({ status: "success", data: data[0] });
 
     } catch (err) {
         console.error("Critical POST Error:", err.message);
-        res.status(500).json({ status: "error", message: "E'lon saqlashda xatolik yuz berdi" });
+        res.status(500).json({ status: "error", message: err.message });
     }
 });
 
