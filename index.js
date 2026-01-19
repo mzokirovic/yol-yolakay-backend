@@ -63,30 +63,35 @@ app.get('/api/trips', async (req, res) => {
 /**
  * 2. Yangi safar qo'shish (POST)
  */
-app.post('/api/trips/:id/book', async (req, res) => {
-    const { id } = req.params;
-    const { seats } = req.body; // Nechta joy band qilmoqchi
+app.post('/api/trips/:id/book-seat', async (req, res) => {
+    const { id } = req.params; // Bu UUID string
+    const { seatNumber, passengerId, passengerName, passengerAvatar } = req.body;
 
     try {
-        // 1. Safarni tekshirish
-        const { data: trip, error: fetchError } = await supabase
-            .from('trips')
-            .select('available_seats')
-            .eq('id', id)
-            .single();
+        // 1. Band qilish
+        const { error: bookErr } = await supabase
+            .from('bookings')
+            .insert([{ 
+                trip_id: id, 
+                seat_number: seatNumber, 
+                passenger_id: passengerId,
+                passenger_name: passengerName,
+                passenger_avatar: passengerAvatar
+            }]);
 
-        if (fetchError || !trip) return res.status(404).json({ message: "Safar topilmadi" });
-        if (trip.available_seats < seats) return res.status(400).json({ message: "Yetarli joy yo'q" });
+        if (bookErr) {
+            if (bookErr.code === '23505') {
+                return res.status(400).json({ message: "Bu o'rin band qilingan!" });
+            }
+            throw bookErr;
+        }
 
-        // 2. Joylarni kamaytirish
-        const { error: updateError } = await supabase
-            .from('trips')
-            .update({ available_seats: trip.available_seats - seats })
-            .eq('id', id);
+        // 2. Trips jadvalidagi available_seats sonini kamaytirish
+        // Senior tip: Bu yerda bitta o'rin band bo'lgani uchun 1 ga kamaytiramiz
+        const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', id).single();
+        await supabase.from('trips').update({ available_seats: trip.available_seats - 1 }).eq('id', id);
 
-        if (updateError) throw updateError;
-
-        res.status(200).json({ status: "success", message: "Joy band qilindi" });
+        res.status(200).json({ status: "success" });
     } catch (err) {
         res.status(500).json({ message: err.message });
     }
