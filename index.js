@@ -58,56 +58,63 @@ app.get('/api/trips', async (req, res) => {
 });
 
 /**
- * 2. Yangi safar qo'shish (POST)
  * Senior Feature: Data Validation va Default qiymatlar
  */
 /**
  * 2. Yangi safar qo'shish (POST)
  */
-app.post('/api/trips', async (req, res) => {
-    // Android'dan kelayotgan maydonlar (driverId qo'shildi)
-    const {        driverId, driverName, phoneNumber, startPoint, endPoint, 
-        tripDate, price, availableSeats, carModel 
-    } = req.body;
-
-    // 🔴 Validation
-    if (!startPoint || !endPoint || !driverName) {
-        return res.status(400).json({ 
-            status: "error", 
-            message: "Majburiy maydonlar kiritilmagan!" 
-        });
-    }
+app.post('/api/trips/:id/book', async (req, res) => {
+    const { id } = req.params;
+    const { seats } = req.body; // Nechta joy band qilmoqchi
 
     try {
-        const payload = { 
-            // driver_id: driverId || "anonymous", // Supabase'da bu ustun bo'lsa yoqing
-            driver_name: driverName, 
-            phone_number: phoneNumber || "+998000000000",
-            from_city: startPoint, 
-            to_city: endPoint, 
-            departure_time: tripDate, // Android yuborgan stringni o'zi
-            price: Number(price) || 0, 
-            available_seats: Number(availableSeats) || 1, 
-            car_model: carModel || "Noma'lum" 
-        };
-
-        const { data, error } = await supabase
+        // 1. Safarni tekshirish
+        const { data: trip, error: fetchError } = await supabase
             .from('trips')
-            .insert([payload])
-            .select();
+            .select('available_seats')
+            .eq('id', id)
+            .single();
 
-        if (error) {
-            console.error("Supabase Insert Error:", error.message);
-            throw error;
-        }
-        
-        res.status(201).json({ status: "success", data: data[0] });
+        if (fetchError || !trip) return res.status(404).json({ message: "Safar topilmadi" });
+        if (trip.available_seats < seats) return res.status(400).json({ message: "Yetarli joy yo'q" });
 
+        // 2. Joylarni kamaytirish
+        const { error: updateError } = await supabase
+            .from('trips')
+            .update({ available_seats: trip.available_seats - seats })
+            .eq('id', id);
+
+        if (updateError) throw updateError;
+
+        res.status(200).json({ status: "success", message: "Joy band qilindi" });
     } catch (err) {
-        console.error("Critical POST Error:", err.message);
-        res.status(500).json({ status: "error", message: err.message });
+        res.status(500).json({ message: err.message });
     }
 });
+
+
+// 3. Safarni band qilish (Seats bilan)
+app.post('/api/trips/:id/book', async (req, res) => {
+    const { id } = req.params;
+    const { seats } = req.body;
+    try {
+        const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', id).single();
+        if (trip.available_seats < seats) return res.status(400).json({ message: "Joy yetarli emas" });
+        
+        await supabase.from('trips').update({ available_seats: trip.available_seats - seats }).eq('id', id);
+        res.status(200).json({ status: "success" });
+    } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+// 4. Safarni o'chirish
+app.delete('/api/trips/:id', async (req, res) => {
+    try {
+        await supabase.from('trips').delete().eq('id', req.params.id);
+        res.status(200).json({ status: "success" });
+    } catch (err) { res.status(500).json({ message: err.message }); }
+});
+
+
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
