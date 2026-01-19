@@ -7,7 +7,6 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Supabase ulanishi
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_ANON_KEY
@@ -18,7 +17,6 @@ const supabase = createClient(
  */
 app.get('/api/trips', async (req, res) => {
     const { from, to } = req.query; 
-
     try {
         let query = supabase
             .from('trips')
@@ -56,7 +54,7 @@ app.get('/api/trips', async (req, res) => {
                     status: "BOOKED",
                     passengerId: b.passenger_id,
                     passengerName: b.passenger_name,
-                    passenger_phone: b.passenger_phone
+                    passengerPhone: b.passenger_phone
                 };
             });
 
@@ -73,7 +71,6 @@ app.get('/api/trips', async (req, res) => {
                 seats: seatsMap
             };
         });
-
         res.status(200).json(responseData);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -81,21 +78,10 @@ app.get('/api/trips', async (req, res) => {
 });
 
 /**
- * 🔥 YANGI: Safar yaratish (POST /api/trips)
- * Senior Approach: Androiddan kelayotgan JSON kalitlarini bazaga moslaymiz
+ * 2. Safar yaratish (POST)
  */
 app.post('/api/trips', async (req, res) => {
-    const { 
-        driverName, 
-        phoneNumber, 
-        startPoint, 
-        endPoint, 
-        tripDate, 
-        price, 
-        availableSeats, 
-        carModel 
-    } = req.body;
-
+    const { driverName, phoneNumber, startPoint, endPoint, tripDate, price, availableSeats, carModel } = req.body;
     try {
         const { data, error } = await supabase
             .from('trips')
@@ -110,60 +96,54 @@ app.post('/api/trips', async (req, res) => {
                 car_model: carModel 
             }])
             .select();
-
         if (error) throw error;
         res.status(201).json(data[0]);
     } catch (err) {
-        console.error("Post Error:", err.message);
         res.status(500).json({ error: err.message });
     }
 });
 
 /**
- * 2. O'rindiqni band qilish (POST)
+ * 3. O'rindiqni band qilish (POST) - Senior Corrected
  */
 app.post('/api/trips/:id/book-seat', async (req, res) => {
     const { id } = req.params;
-    const { seatNumber, passengerId, passengerName, passengerAvatar } = req.body;
+    const { seatNumber, passengerId, passengerName, passengerPhone } = req.body;
 
     try {
-        const { error: bookErr } = await supabase
+        const { data: existingBooking } = await supabase
             .from('bookings')
-            .insert([{ 
-                trip_id: id, 
-                seat_number: seatNumber, 
-                passenger_id: passengerId,
-                passenger_name: passengerName,
-                passenger_avatar: passengerAvatar
-            }]);
+            .select('*')
+            .eq('trip_id', id)
+            .eq('seat_number', seatNumber)
+            .single();
 
-        if (bookErr) {
-            if (bookErr.code === '23505') return res.status(400).json({ message: "Bu o'rin band qilingan!" });
-            throw bookErr;
+        if (existingBooking) {
+            return res.status(400).json({ error: "Bu o'rindiq allaqachon band qilingan" });
         }
 
-        const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', id).single();
-        await supabase.from('trips').update({ available_seats: trip.available_seats - 1 }).eq('id', id);
+        const { error: insertError } = await supabase
+            .from('bookings')
+            .insert([{
+                trip_id: id,
+                seat_number: seatNumber,
+                passenger_id: passengerId,
+                passenger_name: passengerName,
+                passenger_phone: passengerPhone
+            }]);
 
-        res.status(200).json({ status: "success" });
+        if (insertError) throw insertError;
+
+        // Joylar sonini kamaytirish
+        const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', id).single();
+        if (trip && trip.available_seats > 0) {
+            await supabase.from('trips').update({ available_seats: trip.available_seats - 1 }).eq('id', id);
+        }
+
+        res.json({ success: true, message: "O'rindiq band qilindi" });
     } catch (err) {
-        res.status(500).json({ message: err.message });
+        res.status(500).json({ error: err.message });
     }
-});
-
-/**
- * 3. Safarni band qilish (Seats bilan)
- */
-app.post('/api/trips/:id/book', async (req, res) => {
-    const { id } = req.params;
-    const { seats } = req.body;
-    try {
-        const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', id).single();
-        if (trip.available_seats < seats) return res.status(400).json({ message: "Joy yetarli emas" });
-        
-        await supabase.from('trips').update({ available_seats: trip.available_seats - seats }).eq('id', id);
-        res.status(200).json({ status: "success" });
-    } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
 /**
