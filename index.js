@@ -15,13 +15,11 @@ const supabase = createClient(
 
 /**
  * 1. Safarlarni olish (GET)
- * Senior Feature: Pagination (kelajakda) va aqlli filtr
  */
 app.get('/api/trips', async (req, res) => {
     const { from, to } = req.query; 
 
     try {
-        // 1. Safarlarni va ularga tegishli o'rinlarni (bookings) bitta so'rovda olish
         let query = supabase
             .from('trips')
             .select(`
@@ -41,12 +39,8 @@ app.get('/api/trips', async (req, res) => {
         const { data, error } = await query;
         if (error) throw error;
 
-        // 2. DATA MAPPING: Android Map<Int, SeatInfo> modeliga moslash
         const responseData = (data || []).map(t => {
-            // Bookings ro'yxatini Map ko'rinishiga o'tkazamiz
             const seatsMap = {};
-            
-            // Avval barcha o'rinlarni AVAILABLE qilib to'ldiramiz (masalan 4 ta o'rinli mashina)
             for (let i = 1; i <= 4; i++) {
                 seatsMap[i] = {
                     seatNumber: i,
@@ -56,14 +50,13 @@ app.get('/api/trips', async (req, res) => {
                 };
             }
 
-            // Keyin band qilinganlarini ustidan yozamiz
             t.bookings.forEach(b => {
                 seatsMap[b.seat_number] = {
                     seatNumber: b.seat_number,
                     status: "BOOKED",
                     passengerId: b.passenger_id,
                     passengerName: b.passenger_name,
-                    passengerPhone: b.passenger_phone
+                    passenger_phone: b.passenger_phone
                 };
             });
 
@@ -77,7 +70,7 @@ app.get('/api/trips', async (req, res) => {
                 availableSeats: Number(t.available_seats),
                 price: Number(t.price),
                 carModel: t.car_model,
-                seats: seatsMap // 🔥 Android kutayotgan Map mana shu!
+                seats: seatsMap
             };
         });
 
@@ -88,17 +81,52 @@ app.get('/api/trips', async (req, res) => {
 });
 
 /**
- * Senior Feature: Data Validation va Default qiymatlar
+ * 🔥 YANGI: Safar yaratish (POST /api/trips)
+ * Senior Approach: Androiddan kelayotgan JSON kalitlarini bazaga moslaymiz
  */
+app.post('/api/trips', async (req, res) => {
+    const { 
+        driverName, 
+        phoneNumber, 
+        startPoint, 
+        endPoint, 
+        tripDate, 
+        price, 
+        availableSeats, 
+        carModel 
+    } = req.body;
+
+    try {
+        const { data, error } = await supabase
+            .from('trips')
+            .insert([{ 
+                driver_name: driverName, 
+                phone_number: phoneNumber, 
+                from_city: startPoint, 
+                to_city: endPoint, 
+                departure_time: tripDate, 
+                price: price, 
+                available_seats: availableSeats, 
+                car_model: carModel 
+            }])
+            .select();
+
+        if (error) throw error;
+        res.status(201).json(data[0]);
+    } catch (err) {
+        console.error("Post Error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
 /**
- * 2. Yangi safar qo'shish (POST)
+ * 2. O'rindiqni band qilish (POST)
  */
 app.post('/api/trips/:id/book-seat', async (req, res) => {
-    const { id } = req.params; // Bu UUID string
+    const { id } = req.params;
     const { seatNumber, passengerId, passengerName, passengerAvatar } = req.body;
 
     try {
-        // 1. Band qilish
         const { error: bookErr } = await supabase
             .from('bookings')
             .insert([{ 
@@ -110,14 +138,10 @@ app.post('/api/trips/:id/book-seat', async (req, res) => {
             }]);
 
         if (bookErr) {
-            if (bookErr.code === '23505') {
-                return res.status(400).json({ message: "Bu o'rin band qilingan!" });
-            }
+            if (bookErr.code === '23505') return res.status(400).json({ message: "Bu o'rin band qilingan!" });
             throw bookErr;
         }
 
-        // 2. Trips jadvalidagi available_seats sonini kamaytirish
-        // Senior tip: Bu yerda bitta o'rin band bo'lgani uchun 1 ga kamaytiramiz
         const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', id).single();
         await supabase.from('trips').update({ available_seats: trip.available_seats - 1 }).eq('id', id);
 
@@ -127,8 +151,9 @@ app.post('/api/trips/:id/book-seat', async (req, res) => {
     }
 });
 
-
-// 3. Safarni band qilish (Seats bilan)
+/**
+ * 3. Safarni band qilish (Seats bilan)
+ */
 app.post('/api/trips/:id/book', async (req, res) => {
     const { id } = req.params;
     const { seats } = req.body;
@@ -141,15 +166,15 @@ app.post('/api/trips/:id/book', async (req, res) => {
     } catch (err) { res.status(500).json({ message: err.message }); }
 });
 
-// 4. Safarni o'chirish
+/**
+ * 4. Safarni o'chirish (DELETE)
+ */
 app.delete('/api/trips/:id', async (req, res) => {
     try {
         await supabase.from('trips').delete().eq('id', req.params.id);
         res.status(200).json({ status: "success" });
     } catch (err) { res.status(500).json({ message: err.message }); }
 });
-
-
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
