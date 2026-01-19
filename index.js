@@ -21,39 +21,69 @@ app.get('/api/trips', async (req, res) => {
     const { from, to } = req.query; 
 
     try {
+        // 1. Safarlarni va ularga tegishli o'rinlarni (bookings) bitta so'rovda olish
         let query = supabase
             .from('trips')
-            .select('*')
+            .select(`
+                *,
+                bookings (
+                    seat_number,
+                    passenger_id,
+                    passenger_name,
+                    passenger_phone
+                )
+            `)
             .order('created_at', { ascending: false });
 
-        // Filtrlar faqat qiymat mavjud bo'lganda qo'shiladi
-        if (from && from.trim() !== "") {
-            query = query.ilike('from_city', `%${from.trim()}%`);
-        }
-        if (to && to.trim() !== "") {
-            query = query.ilike('to_city', `%${to.trim()}%`);
-        }
+        if (from) query = query.ilike('from_city', `%${from}%`);
+        if (to) query = query.ilike('to_city', `%${to}%`);
 
         const { data, error } = await query;
         if (error) throw error;
 
-        // ✅ DATA MAPPING: Front-end (Android) kutayotgan modelga o'girish
-        const responseData = (data || []).map(t => ({
-            id: t.id.toString(),
-            driverName: t.driver_name || "Noma'lum",      
-            phoneNumber: t.phone_number || "Raqam yo'q",
-            startPoint: t.from_city || "Noma'lum",        
-            endPoint: t.to_city || "Noma'lum",            
-            tripDate: t.departure_time || "",
-            availableSeats: Number(t.available_seats) || 0,
-            price: Number(t.price) || 0,
-            carModel: t.car_model || "Noma'lum"
-        }));
+        // 2. DATA MAPPING: Android Map<Int, SeatInfo> modeliga moslash
+        const responseData = (data || []).map(t => {
+            // Bookings ro'yxatini Map ko'rinishiga o'tkazamiz
+            const seatsMap = {};
+            
+            // Avval barcha o'rinlarni AVAILABLE qilib to'ldiramiz (masalan 4 ta o'rinli mashina)
+            for (let i = 1; i <= 4; i++) {
+                seatsMap[i] = {
+                    seatNumber: i,
+                    status: "AVAILABLE",
+                    passengerId: null,
+                    passengerName: null
+                };
+            }
+
+            // Keyin band qilinganlarini ustidan yozamiz
+            t.bookings.forEach(b => {
+                seatsMap[b.seat_number] = {
+                    seatNumber: b.seat_number,
+                    status: "BOOKED",
+                    passengerId: b.passenger_id,
+                    passengerName: b.passenger_name,
+                    passengerPhone: b.passenger_phone
+                };
+            });
+
+            return {
+                id: t.id.toString(),
+                driverName: t.driver_name,
+                phoneNumber: t.phone_number,
+                startPoint: t.from_city,
+                endPoint: t.to_city,
+                tripDate: t.departure_time,
+                availableSeats: Number(t.available_seats),
+                price: Number(t.price),
+                carModel: t.car_model,
+                seats: seatsMap // 🔥 Android kutayotgan Map mana shu!
+            };
+        });
 
         res.status(200).json(responseData);
     } catch (err) {
-        console.error("Critical GET Error:", err.message);
-        res.status(500).json({ status: "error", message: "Serverda ichki xatolik yuz berdi" });
+        res.status(500).json({ error: err.message });
     }
 });
 
