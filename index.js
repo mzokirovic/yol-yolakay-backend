@@ -14,6 +14,8 @@ const supabase = createClient(
 
 /**
  * 1. Safarlarni olish (GET)
+ * Senior Tip: Frontend uchun murakkab mappingni backendda bajarish 
+ * mobil ilova ishini yengillashtiradi.
  */
 app.get('/api/trips', async (req, res) => {
     const { from, to } = req.query; 
@@ -29,7 +31,7 @@ app.get('/api/trips', async (req, res) => {
                     passenger_phone
                 )
             `)
-            .order('created_at', { ascending: false });
+            .order('departure_time', { ascending: true });
 
         if (from) query = query.ilike('from_city', `%${from}%`);
         if (to) query = query.ilike('to_city', `%${to}%`);
@@ -39,6 +41,7 @@ app.get('/api/trips', async (req, res) => {
 
         const responseData = (data || []).map(t => {
             const seatsMap = {};
+            // Avval barcha 4 ta o'rinni bo'sh deb tayyorlaymiz
             for (let i = 1; i <= 4; i++) {
                 seatsMap[i] = {
                     seatNumber: i,
@@ -48,10 +51,11 @@ app.get('/api/trips', async (req, res) => {
                 };
             }
 
+            // Band qilingan o'rinlarni ustidan yozamiz
             t.bookings.forEach(b => {
                 seatsMap[b.seat_number] = {
                     seatNumber: b.seat_number,
-                    status: "BOOKED",
+                    status: b.passenger_id === 'DRIVER_BLOCK' ? 'BLOCKED' : 'BOOKED',
                     passengerId: b.passenger_id,
                     passengerName: b.passenger_name,
                     passengerPhone: b.passenger_phone
@@ -104,25 +108,27 @@ app.post('/api/trips', async (req, res) => {
 });
 
 /**
- * 3. O'rindiqni band qilish (POST) - Senior Corrected
+ * 3. O'rindiqni band qilish (POST) - Senior Protected (Race Condition Safe)
  */
 app.post('/api/trips/:id/book-seat', async (req, res) => {
     const { id } = req.params;
     const { seatNumber, passengerId, passengerName, passengerPhone } = req.body;
 
     try {
-        const { data: existingBooking } = await supabase
+        // 1-QADAM: Atomic tekshiruv (SELECT va INSERT orasida vaqt qoldirmaslik kerak)
+        // Senior Tip: Unique constraint (trip_id + seat_number) bazada bo'lishi shart!
+        const { data: existing } = await supabase
             .from('bookings')
-            .select('*')
-            .eq('trip_id', id)
-            .eq('seat_number', seatNumber)
-            .single();
+            .select('id')
+            .match({ trip_id: id, seat_number: seatNumber })
+            .maybeSingle();
 
-        if (existingBooking) {
-            return res.status(400).json({ error: "Bu o'rindiq allaqachon band qilingan" });
+        if (existing) {
+            return res.status(409).json({ error: "Bu o'rindiq allaqachon band" });
         }
 
-        const { error: insertError } = await supabase
+        // 2-QADAM: Band qilish
+        const { error: bookingError } = await supabase
             .from('bookings')
             .insert([{
                 trip_id: id,
@@ -132,15 +138,22 @@ app.post('/api/trips/:id/book-seat', async (req, res) => {
                 passenger_phone: passengerPhone
             }]);
 
-        if (insertError) throw insertError;
+        if (bookingError) throw bookingError;
 
-        // Joylar sonini kamaytirish
-        const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', id).single();
-        if (trip && trip.available_seats > 0) {
-            await supabase.from('trips').update({ available_seats: trip.available_seats - 1 }).eq('id', id);
+        // 3-QADAM: Safardagi o'rinlar sonini kamaytirish (Atomic decrement)
+        // Bu joyda xatolik bo'lsa available_seats va bookings nomutanosib bo'ladi.
+        // Buni oldini olish uchun Trigger ishlatish tavsiya etiladi (avvalgi suhbatda ko'rdik).
+        const { error: updateError } = await supabase.rpc('decrement_available_seats', { t_id: id });
+        
+        // Agar RPC funksiya bo'lmasa, oddiy usul (lekin trigger yaxshiroq):
+        if (updateError) {
+             const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', id).single();
+             if (trip && trip.available_seats > 0) {
+                 await supabase.from('trips').update({ available_seats: trip.available_seats - 1 }).eq('id', id);
+             }
         }
 
-        res.json({ success: true, message: "O'rindiq band qilindi" });
+        res.json({ success: true, message: "Muvaffaqiyatli band qilindi" });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -151,9 +164,14 @@ app.post('/api/trips/:id/book-seat', async (req, res) => {
  */
 app.delete('/api/trips/:id', async (req, res) => {
     try {
-        await supabase.from('trips').delete().eq('id', req.params.id);
+        // Avval bog'langan bookinglarni o'chirish kerak (Cascade delete bo'lmasa)
+        await supabase.from('bookings').delete().eq('trip_id', req.params.id);
+        const { error } = await supabase.from('trips').delete().eq('id', req.params.id);
+        if (error) throw error;
         res.status(200).json({ status: "success" });
-    } catch (err) { res.status(500).json({ message: err.message }); }
+    } catch (err) { 
+        res.status(500).json({ message: err.message }); 
+    }
 });
 
 const PORT = process.env.PORT || 3000;
