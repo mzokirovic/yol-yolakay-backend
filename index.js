@@ -13,14 +13,13 @@ const supabase = createClient(
 );
 
 /**
- * 1. Safarlarni olish (GET)
- * Senior Tip: Frontend uchun murakkab mappingni backendda bajarish 
- * mobil ilova ishini yengillashtiradi.
+ * 1a. Bitta safarni ID bo'yicha olish (GET)
+ * Bu endpoint Android'dagi Safar Tafsilotlari (Details) ekrani uchun zarur.
  */
-app.get('/api/trips', async (req, res) => {
-    const { from, to } = req.query; 
+app.get('/api/trips/:id', async (req, res) => {
+    const { id } = req.params;
     try {
-        let query = supabase
+        const { data: t, error } = await supabase
             .from('trips')
             .select(`
                 *,
@@ -31,55 +30,52 @@ app.get('/api/trips', async (req, res) => {
                     passenger_phone
                 )
             `)
-            .order('departure_time', { ascending: true });
+            .eq('id', id)
+            .single();
 
-        if (from) query = query.ilike('from_city', `%${from}%`);
-        if (to) query = query.ilike('to_city', `%${to}%`);
-
-        const { data, error } = await query;
         if (error) throw error;
+        if (!t) return res.status(404).json({ error: "Safar topilmadi" });
 
-        const responseData = (data || []).map(t => {
-            const seatsMap = {};
-            // Avval barcha 4 ta o'rinni bo'sh deb tayyorlaymiz
-            for (let i = 1; i <= 4; i++) {
-                seatsMap[i] = {
-                    seatNumber: i,
-                    status: "AVAILABLE",
-                    passengerId: null,
-                    passengerName: null
-                };
-            }
+        // Mapping (GET /api/trips dagi mantiq bilan bir xil)
+        const seatsMap = {};
+        for (let i = 1; i <= 4; i++) {
+            seatsMap[i] = {
+                seatNumber: i,
+                status: "AVAILABLE",
+                passengerId: null,
+                passengerName: null
+            };
+        }
 
-            // Band qilingan o'rinlarni ustidan yozamiz
-            t.bookings.forEach(b => {
-                seatsMap[b.seat_number] = {
-                    seatNumber: b.seat_number,
-                    status: b.passenger_id === 'DRIVER_BLOCK' ? 'BLOCKED' : 'BOOKED',
-                    passengerId: b.passenger_id,
-                    passengerName: b.passenger_name,
-                    passengerPhone: b.passenger_phone
-                };
-            });
-
-            return {
-                id: t.id.toString(),
-                driverName: t.driver_name,
-                phoneNumber: t.phone_number,
-                startPoint: t.from_city,
-                endPoint: t.to_city,
-                tripDate: t.departure_time,
-                availableSeats: Number(t.available_seats),
-                price: Number(t.price),
-                carModel: t.car_model,
-                seats: seatsMap
+        t.bookings.forEach(b => {
+            seatsMap[b.seat_number] = {
+                seatNumber: b.seat_number,
+                status: b.passenger_id === 'DRIVER_BLOCK' ? 'BLOCKED' : 'BOOKED',
+                passengerId: b.passenger_id,
+                passengerName: b.passenger_name,
+                passengerPhone: b.passenger_phone
             };
         });
+
+        const responseData = {
+            id: t.id.toString(),
+            driverName: t.driver_name,
+            phoneNumber: t.phone_number,
+            startPoint: t.from_city,
+            endPoint: t.to_city,
+            tripDate: t.departure_time,
+            availableSeats: Number(t.available_seats),
+            price: Number(t.price),
+            carModel: t.car_model,
+            seats: seatsMap
+        };
+
         res.status(200).json(responseData);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
 });
+
 
 /**
  * 2. Safar yaratish (POST)
