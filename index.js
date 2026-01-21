@@ -201,6 +201,22 @@ app.delete('/api/trips/:id', async (req, res) => {
     }
 });
 
+
+// Mashhur joylarni olish
+app.get('/api/popular-points', async (req, res) => {
+    const { city } = req.query; // shahar bo'yicha filtrlash uchun
+    let query = supabase.from('popular_points').select('*').eq('is_active', true);
+    
+    if (city) {
+        query = query.ilike('city_name', `%${city}%`);
+    }
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json(error);
+    res.json(data);
+});
+
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server running on port ${PORT}`);
