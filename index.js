@@ -1,7 +1,6 @@
 const express = require('express');
 const { createClient } = require('@supabase/supabase-js');
-const cors = require('cors');
-require('dotenv').config();
+const cors = require('cors');require('dotenv').config();
 
 const app = express();
 app.use(cors());
@@ -13,12 +12,14 @@ const supabase = createClient(
 );
 
 /**
- * Android TripDto kontraktiga mapping qilish
+ * UTILS: Data Transformation
  */
 const mapTripData = (t) => {
     if (!t) return null;
+    
+    // O'rindiqlarni dinamik shakllantirish
     const seatsMap = {};
-    const totalSeats = 4;
+    const totalSeats = t.total_seats || 4; // Baza ustuniga qarab
 
     for (let i = 1; i <= totalSeats; i++) {
         seatsMap[i.toString()] = {
@@ -56,15 +57,15 @@ const mapTripData = (t) => {
         price: Number(t.price),
         car_model: t.car_model,
         seats: seatsMap,
-        startLat: t.start_lat || t.startLat || null,
-        startLng: t.start_lng || t.startLng || null,
-        endLat: t.end_lat || t.endLat || null,
-        endLng: t.end_lng || t.endLng || null
+        startLat: t.start_lat || null,
+        startLng: t.start_lng || null,
+        endLat: t.end_lat || null,
+        endLng: t.end_lng || null
     };
 };
 
 /**
- * 1. BARCHA SAFARLARNI OLISH
+ * 1. GET ALL TRIPS (Filtrlar bilan)
  */
 app.get('/api/trips', async (req, res) => {
     const { from, to } = req.query;
@@ -82,18 +83,17 @@ app.get('/api/trips', async (req, res) => {
 
         res.status(200).json((data || []).map(mapTripData));
     } catch (err) {
-        console.error("GET /api/trips error:", err.message);
-        res.status(500).json({ error: err.message });
+        console.error("GET Trips Error:", err.message);
+        res.status(500).json({ error: "Server xatosi: Safarlarni yuklab bo'lmadi" });
     }
 });
 
 /**
- * 2. BITTA SAFARNI ID BO'YICHA OLISH (LOGCATDAGI 404 NI TUZATUVCHI QISM)
+ * 2. GET TRIP BY ID
  */
 app.get('/api/trips/:id', async (req, res) => {
     const { id } = req.params;
     try {
-        console.log(`🔍 Safar so'ralmoqda: ${id}`);
         const { data, error } = await supabase
             .from('trips')
             .select(`*, bookings (seat_number, passenger_id, passenger_name, passenger_phone)`)
@@ -101,31 +101,37 @@ app.get('/api/trips/:id', async (req, res) => {
             .maybeSingle();
 
         if (error) throw error;
-        
-        if (!data) {
-            console.warn(`⚠️ Safar topilmadi: ${id}`);
-            return res.status(404).json({ error: "Safar topilmadi" });
-        }
+        if (!data) return res.status(404).json({ error: "Safar topilmadi" });
 
         res.status(200).json(mapTripData(data));
     } catch (err) {
-        console.error(`❌ Detail error (${id}):`, err.message);
-        res.status(500).json({ error: "Server ichki xatosi" });
+        res.status(500).json({ error: err.message });
     }
 });
 
 /**
- * 3. YANGI SAFAR YARATISH
+ * 3. CREATE TRIP
  */
 app.post('/api/trips', async (req, res) => {
-    const { driver_id, driver_name, phone_number, from_city, to_city, departure_time, price, available_seats, car_model } = req.body;
-
-    if (!driver_id) return res.status(400).json({ error: "driver_id talab qilinadi" });
-
     try {
+        const tripData = req.body;
         const { data, error } = await supabase
             .from('trips')
-            .insert([{ driver_id, driver_name, phone_number, from_city, to_city, departure_time, price, available_seats: available_seats || 4, car_model }])
+            .insert([{
+                driver_id: tripData.driver_id,
+                driver_name: tripData.driver_name,
+                phone_number: tripData.phone_number,
+                from_city: tripData.from_city,
+                to_city: tripData.to_city,
+                departure_time: tripData.departure_time,
+                price: tripData.price,
+                available_seats: tripData.available_seats || 4,
+                car_model: tripData.car_model,
+                start_lat: tripData.startLat,
+                start_lng: tripData.startLng,
+                end_lat: tripData.endLat,
+                end_lng: tripData.endLng
+            }])
             .select();
 
         if (error) throw error;
@@ -136,21 +142,35 @@ app.post('/api/trips', async (req, res) => {
 });
 
 /**
- * 4. O'RINDIQ BAND QILISH VA BILDIRISNOMA
+ * 4. BOOK SEAT (CRITICAL BUSINESS LOGIC)
  */
 app.post('/api/trips/:id/book-seat', async (req, res) => {
     const { id } = req.params;
     const { seatNumber, passengerId, passengerName, passengerPhone } = req.body;
 
     try {
-        const { data: trip, error: tripError } = await supabase
+        // A. Avval tekshirish: Bu o'rin bo'shmidi?
+        const { data: existingBooking } = await supabase
+            .from('bookings')
+            .select('id')
+            .eq('trip_id', id)
+            .eq('seat_number', seatNumber)
+            .maybeSingle();
+
+        if (existingBooking) {
+            return res.status(400).json({ error: "Bu o'rindiq allaqachon band qilingan!" });
+        }
+
+        // B. Safar haqida ma'lumot olish
+        const { data: trip } = await supabase
             .from('trips')
-            .select('driver_id, available_seats')
+            .select('driver_id, available_seats, from_city, to_city')
             .eq('id', id)
             .single();
 
-        if (tripError || !trip) return res.status(404).json({ error: "Safar topilmadi" });
+        if (!trip) return res.status(404).json({ error: "Safar topilmadi" });
 
+        // C. Band qilish (Insert booking)
         const { error: bookingError } = await supabase
             .from('bookings')
             .insert([{
@@ -163,26 +183,33 @@ app.post('/api/trips/:id/book-seat', async (req, res) => {
 
         if (bookingError) throw bookingError;
 
-        // Bildirishnoma yuborish
-        await supabase.from('notifications').insert([{
-            user_id: trip.driver_id, 
-            title: "Yangi bandlov! 🚗",
-            body: `${passengerName} ${seatNumber}-o'rindiqni band qildi.`,
-            is_read: false
-        }]);
-
+        // D. Safardagi bo'sh joylar sonini yangilash
         if (trip.available_seats > 0) {
-            await supabase.from('trips').update({ available_seats: trip.available_seats - 1 }).eq('id', id);
+            await supabase
+                .from('trips')
+                .update({ available_seats: trip.available_seats - 1 })
+                .eq('id', id);
         }
 
-        res.json({ success: true });
+        // E. Haydovchiga bildirishnoma yuborish
+        await supabase.from('notifications').insert([{
+            user_id: trip.driver_id,
+            title: "Yangi yo'lovchi! 🚗",
+            body: `${passengerName} ${trip.from_city} -> ${trip.to_city} yo'nalishida ${seatNumber}-o'rinni band qildi.`,
+            is_read: false,
+            type: "BOOKING"
+        }]);
+
+        res.status(200).json({ success: true, message: "Joy band qilindi" });
+
     } catch (err) {
-        res.status(500).json({ error: err.message });
+        console.error("Booking Error:", err.message);
+        res.status(500).json({ error: "Band qilishda texnik xatolik: " + err.message });
     }
 });
 
 /**
- * 5. BILDIRISNOMALARNI OLISH
+ * 5. GET NOTIFICATIONS
  */
 app.get('/api/notifications', async (req, res) => {
     const { user_id } = req.query;
@@ -193,8 +220,7 @@ app.get('/api/notifications', async (req, res) => {
             .from('notifications')
             .select('*')
             .eq('user_id', user_id)
-            .order('created_at', { ascending: false })
-            .limit(30);
+            .order('created_at', { ascending: false });
 
         if (error) throw error;
         res.json(data);
@@ -203,7 +229,30 @@ app.get('/api/notifications', async (req, res) => {
     }
 });
 
+/**
+ * 6. LEAVE REVIEW
+ */
+app.post('/api/reviews', async (req, res) => {
+    const { reviewer_id, target_user_id, rating, comment, trip_id } = req.body;
+    try {
+        const { error } = await supabase
+            .from('reviews')
+            .insert([{
+                reviewer_id,
+                target_user_id,
+                rating,
+                comment,
+                trip_id
+            }]);
+
+        if (error) throw error;
+        res.status(201).json({ success: true });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`🚀 Server running on port ${PORT}`);
+    console.log(`🚀 Senior-level Server running on port ${PORT}`);
 });
