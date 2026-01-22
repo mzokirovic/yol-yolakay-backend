@@ -148,13 +148,14 @@ app.get('/api/trips/:id', async (req, res) => {
 });
 
 /**
- * 4. O'rindiqni band qilish
+ * 4. O'rindiqni band qilish va Bildirishnoma yaratish
  */
 app.post('/api/trips/:id/book-seat', async (req, res) => {
-    const { id } = req.params;
+    const { id } = req.params; // Trip ID
     const { seatNumber, passengerId, passengerName, passengerPhone } = req.body;
 
     try {
+        // 1. Avval o'rindiq bandligini tekshiramiz
         const { data: existing } = await supabase
             .from('bookings')
             .select('id')
@@ -163,6 +164,16 @@ app.post('/api/trips/:id/book-seat', async (req, res) => {
 
         if (existing) return res.status(409).json({ error: "Bu o'rindiq band" });
 
+        // 2. Safar va Haydovchi ma'lumotlarini olamiz
+        const { data: trip, error: tripError } = await supabase
+            .from('trips')
+            .select('driver_name, available_seats')
+            .eq('id', id)
+            .single();
+
+        if (tripError || !trip) throw new Error("Safar topilmadi");
+
+        // 3. Band qilish (Booking)
         const { error: bookingError } = await supabase
             .from('bookings')
             .insert([{
@@ -175,13 +186,53 @@ app.post('/api/trips/:id/book-seat', async (req, res) => {
 
         if (bookingError) throw bookingError;
 
-        // O'rinlar sonini yangilash
-        const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', id).single();
-        if (trip && trip.available_seats > 0) {
-            await supabase.from('trips').update({ available_seats: trip.available_seats - 1 }).eq('id', id);
+        // 4. HAYDOVCHI UCHUN BILDIRISHNOMA YARATISH (Senior logic)
+        // Android ViewModel dagi "user_hashCode" mantiqi bilan bir xil ID yaratamiz
+        const driverId = `user_${(trip.driver_name || "Guest").split('').reduce((a, b) => {
+            a = ((a << 5) - a) + b.charCodeAt(0);
+            return a & a;
+        }, 0)}`;
+
+        await supabase.from('notifications').insert([{
+            user_id: driverId,
+            title: "Yangi bandlov! 🚗",
+            body: `${passengerName} ${seatNumber}-o'rindiqni band qildi. Tel: ${passengerPhone}`,
+            type: "BOOKING_CONFIRMED"
+        }]);
+
+        // 5. O'rinlar sonini kamaytirish
+        if (trip.available_seats > 0) {
+            await supabase
+                .from('trips')
+                .update({ available_seats: trip.available_seats - 1 })
+                .eq('id', id);
         }
 
-        res.json({ success: true });
+        res.json({ success: true, message: "Joy band qilindi va haydovchi ogohlantirildi" });
+
+    } catch (err) {
+        console.error("Booking error:", err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+/**
+ * BILDIRISHNOMALARNI OLISH ENDPOINTI
+ */
+app.get('/api/notifications', async (req, res) => {
+    const { user_id } = req.query;
+    if (!user_id) return res.status(400).json({ error: "user_id talab qilinadi" });
+
+    try {
+        const { data, error } = await supabase
+            .from('notifications')
+            .select('*')
+            .eq('user_id', user_id)
+            .order('created_at', { ascending: false })
+            .limit(20);
+
+        if (error) throw error;
+        res.json(data);
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
