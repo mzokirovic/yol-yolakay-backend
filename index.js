@@ -13,13 +13,13 @@ const supabase = createClient(
 );
 
 /**
- * Android TripDto uchun ma'lumotlarni formatlash (Mapping)
+ * Android TripDto kontraktiga mapping qilish
  */
 const mapTripData = (t) => {
+    if (!t) return null;
     const seatsMap = {};
     const totalSeats = 4;
 
-    // Barcha o'rindiqlarni boshlang'ich holati (AVAILABLE)
     for (let i = 1; i <= totalSeats; i++) {
         seatsMap[i.toString()] = {
             seatNumber: i,
@@ -30,7 +30,6 @@ const mapTripData = (t) => {
         };
     }
 
-    // Band qilingan o'rindiqlarni bazadan olingan ma'lumot bilan yangilash
     if (t.bookings && Array.isArray(t.bookings)) {
         t.bookings.forEach(b => {
             if (seatsMap[b.seat_number.toString()]) {
@@ -47,7 +46,7 @@ const mapTripData = (t) => {
 
     return {
         id: t.id.toString(),
-        driver_id: t.driver_id,          // Android UUID bilan mos
+        driver_id: t.driver_id,
         driver_name: t.driver_name,
         phone_number: t.phone_number,
         from_city: t.from_city,
@@ -57,15 +56,15 @@ const mapTripData = (t) => {
         price: Number(t.price),
         car_model: t.car_model,
         seats: seatsMap,
-        startLat: t.start_lat || null,
-        startLng: t.start_lng || null,
-        endLat: t.end_lat || null,
-        endLng: t.end_lng || null
+        startLat: t.start_lat || t.startLat || null,
+        startLng: t.start_lng || t.startLng || null,
+        endLat: t.end_lat || t.endLat || null,
+        endLng: t.end_lng || t.endLng || null
     };
 };
 
 /**
- * 1. Safarlarni qidirish va olish
+ * 1. BARCHA SAFARLARNI OLISH
  */
 app.get('/api/trips', async (req, res) => {
     const { from, to } = req.query;
@@ -83,42 +82,50 @@ app.get('/api/trips', async (req, res) => {
 
         res.status(200).json((data || []).map(mapTripData));
     } catch (err) {
+        console.error("GET /api/trips error:", err.message);
         res.status(500).json({ error: err.message });
     }
 });
 
 /**
- * 2. Yangi safar yaratish (Androiddan driver_id kelishi shart)
+ * 2. BITTA SAFARNI ID BO'YICHA OLISH (LOGCATDAGI 404 NI TUZATUVCHI QISM)
+ */
+app.get('/api/trips/:id', async (req, res) => {
+    const { id } = req.params;
+    try {
+        console.log(`🔍 Safar so'ralmoqda: ${id}`);
+        const { data, error } = await supabase
+            .from('trips')
+            .select(`*, bookings (seat_number, passenger_id, passenger_name, passenger_phone)`)
+            .eq('id', id)
+            .maybeSingle();
+
+        if (error) throw error;
+        
+        if (!data) {
+            console.warn(`⚠️ Safar topilmadi: ${id}`);
+            return res.status(404).json({ error: "Safar topilmadi" });
+        }
+
+        res.status(200).json(mapTripData(data));
+    } catch (err) {
+        console.error(`❌ Detail error (${id}):`, err.message);
+        res.status(500).json({ error: "Server ichki xatosi" });
+    }
+});
+
+/**
+ * 3. YANGI SAFAR YARATISH
  */
 app.post('/api/trips', async (req, res) => {
-    const { 
-        driver_id,      // Android DataStore dagi UUID
-        driver_name, 
-        phone_number, 
-        from_city, 
-        to_city, 
-        departure_time, 
-        price, 
-        available_seats, 
-        car_model 
-    } = req.body;
+    const { driver_id, driver_name, phone_number, from_city, to_city, departure_time, price, available_seats, car_model } = req.body;
 
-    if (!driver_id) return res.status(400).json({ error: "driver_id (UUID) talab qilinadi" });
+    if (!driver_id) return res.status(400).json({ error: "driver_id talab qilinadi" });
 
     try {
         const { data, error } = await supabase
             .from('trips')
-            .insert([{ 
-                driver_id, 
-                driver_name, 
-                phone_number, 
-                from_city, 
-                to_city, 
-                departure_time, 
-                price, 
-                available_seats: available_seats || 4, 
-                car_model 
-            }])
+            .insert([{ driver_id, driver_name, phone_number, from_city, to_city, departure_time, price, available_seats: available_seats || 4, car_model }])
             .select();
 
         if (error) throw error;
@@ -129,14 +136,13 @@ app.post('/api/trips', async (req, res) => {
 });
 
 /**
- * 3. O'rindiqni band qilish va Haydovchiga Bildirishnoma yuborish
+ * 4. O'RINDIQ BAND QILISH VA BILDIRISNOMA
  */
 app.post('/api/trips/:id/book-seat', async (req, res) => {
     const { id } = req.params;
     const { seatNumber, passengerId, passengerName, passengerPhone } = req.body;
 
     try {
-        // Safar ma'lumotlarini (haydovchi UUID si bilan) olish
         const { data: trip, error: tripError } = await supabase
             .from('trips')
             .select('driver_id, available_seats')
@@ -145,7 +151,6 @@ app.post('/api/trips/:id/book-seat', async (req, res) => {
 
         if (tripError || !trip) return res.status(404).json({ error: "Safar topilmadi" });
 
-        // Band qilish
         const { error: bookingError } = await supabase
             .from('bookings')
             .insert([{
@@ -158,8 +163,7 @@ app.post('/api/trips/:id/book-seat', async (req, res) => {
 
         if (bookingError) throw bookingError;
 
-        // BIZNING "SENIOR" MANTIQ: 
-        // Haydovchining driver_id (UUID) siga bildirishnoma yuboramiz
+        // Bildirishnoma yuborish
         await supabase.from('notifications').insert([{
             user_id: trip.driver_id, 
             title: "Yangi bandlov! 🚗",
@@ -167,12 +171,8 @@ app.post('/api/trips/:id/book-seat', async (req, res) => {
             is_read: false
         }]);
 
-        // O'rinlar sonini kamaytirish
         if (trip.available_seats > 0) {
-            await supabase
-                .from('trips')
-                .update({ available_seats: trip.available_seats - 1 })
-                .eq('id', id);
+            await supabase.from('trips').update({ available_seats: trip.available_seats - 1 }).eq('id', id);
         }
 
         res.json({ success: true });
@@ -182,10 +182,10 @@ app.post('/api/trips/:id/book-seat', async (req, res) => {
 });
 
 /**
- * 4. Bildirishnomalarni olish (Polling uchun)
+ * 5. BILDIRISNOMALARNI OLISH
  */
 app.get('/api/notifications', async (req, res) => {
-    const { user_id } = req.query; // Android bu yerda o'zining UUID sini yuboradi
+    const { user_id } = req.query;
     if (!user_id) return res.status(400).json({ error: "user_id talab qilinadi" });
 
     try {
@@ -203,7 +203,6 @@ app.get('/api/notifications', async (req, res) => {
     }
 });
 
-// Port sozlamalari
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 Server running on port ${PORT}`);
