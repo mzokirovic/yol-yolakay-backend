@@ -1,6 +1,40 @@
 const supabase = require('../config/supabase');
 
 class TripService {
+
+
+async createTrip(tripData) {
+    const {
+        driver_id, driver_name, from_city, to_city,
+        price, available_seats, departure_time,
+        car_model, driver_phone,
+        start_lat, start_lng, end_lat, end_lng
+    } = tripData;
+
+    const { data, error } = await supabase
+        .from('trips')
+        .insert([{
+            driver_id,
+            driver_name,
+            from_city,
+            to_city,
+            price,
+            available_seats,
+            departure_time,
+            car_model,
+            phone_number: driver_phone, // Android'dagi driver_phone -> DB'dagi phone_number
+            start_lat,
+            start_lng,
+            end_lat,
+            end_lng
+        }])
+        .select()
+        .single();
+
+    if (error) throw error;
+    return data;
+}
+
     // 1. Safarlarni filtr bilan olish
     async fetchAllTrips(from, to, date, passengers) {
         let query = supabase

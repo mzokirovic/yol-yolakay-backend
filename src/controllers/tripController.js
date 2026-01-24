@@ -18,3 +18,12 @@ exports.bookSeat = async (req, res) => {
         res.status(400).json({ error: err.message });
     }
 };
+
+exports.createTrip = async (req, res) => {
+    try {
+        const result = await TripService.createTrip(req.body);
+        res.status(201).json(result);
+    } catch (err) {
+        res.status(400).json({ error: err.message });
+    }
+};
