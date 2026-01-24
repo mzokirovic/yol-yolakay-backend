@@ -9,7 +9,7 @@ class TripService {
             start_lat, start_lng, end_lat, end_lng
         } = tripData;
 
-        // 🛡️ Senior Fix 1: Profilni Upsert qilish (FK xatosini oldini oladi)
+        // Profilni Upsert qilish (FK xatosini oldini oladi)
         await supabase.from('profiles').upsert({
             id: driver_id,
             full_name: driver_name,
@@ -46,7 +46,6 @@ class TripService {
             .select(`*, bookings (seat_number, passenger_id, passenger_name, passenger_phone)`)
             .order('departure_time', { ascending: true });
 
-        // 🛡️ Senior Fix 2: Bo'sh stringlarni tekshirish
         if (from && from.trim() !== "") query = query.ilike('from_city', `%${from}%`);
         if (to && to.trim() !== "") query = query.ilike('to_city', `%${to}%`);
 
@@ -67,17 +66,27 @@ class TripService {
         return data;
     }
 
+    // 🔥 YANGI: ID orqali safarni qidirish mantiqi
+    async fetchTripById(tripId) {
+        const { data, error } = await supabase
+            .from('trips')
+            .select(`*, bookings (seat_number, passenger_id, passenger_name, passenger_phone)`)
+            .eq('id', tripId)
+            .maybeSingle(); // single() o'rniga maybeSingle() - xavfsizroq
+
+        if (error) throw error;
+        return data;
+    }
+
     async bookSeat(tripId, bookingData) {
         const { seatNumber, passengerId, passengerName, passengerPhone } = bookingData;
 
-        // 🛡️ Senior Fix 3: Profilni Upsert qilish (Yo'lovchi uchun)
         await supabase.from('profiles').upsert({
             id: passengerId,
             full_name: passengerName,
             phone_number: passengerPhone
         });
 
-        // A. Tekshirish: O'rin bo'shmi?
         const { data: existing } = await supabase
             .from('bookings')
             .select('id')
@@ -87,7 +96,6 @@ class TripService {
 
         if (existing) throw new Error("Bu o'rindiq allaqachon band!");
 
-        // B. Safarni olish
         const { data: trip, error: tripErr } = await supabase
             .from('trips')
             .select('*')
@@ -97,7 +105,6 @@ class TripService {
         if (tripErr || !trip) throw new Error("Safar topilmadi");
         if (trip.available_seats <= 0) throw new Error("Bo'sh joy qolmagan!");
 
-        // C. Booking va joyni kamaytirish (Atomic bo'lishi tavsiya etiladi)
         const { error: bookErr } = await supabase
             .from('bookings')
             .insert([{
@@ -110,13 +117,11 @@ class TripService {
 
         if (bookErr) throw bookErr;
 
-        // D. Joylar sonini kamaytirish
         await supabase
             .from('trips')
             .update({ available_seats: trip.available_seats - 1 })
             .eq('id', tripId);
 
-        // E. Notification
         await supabase.from('notifications').insert([{
             user_id: trip.driver_id,
             title: "Yangi yo'lovchi! 🚗",
