@@ -2,8 +2,8 @@ const TripService = require('../services/tripService');
 
 exports.getAll = async (req, res) => {
     try {
-        const { from, to } = req.query;
-        const data = await TripService.fetchAllTrips(from, to);
+        const { from, to, date, passengers } = req.query;
+        const data = await TripService.fetchAllTrips(from, to, date, passengers);
         res.status(200).json(data); // Mapper qo'shish mumkin
     } catch (err) {
         res.status(500).json({ error: err.message });

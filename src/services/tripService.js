@@ -2,7 +2,7 @@ const supabase = require('../config/supabase');
 
 class TripService {
     // 1. Safarlarni filtr bilan olish
-    async fetchAllTrips(from, to) {
+    async fetchAllTrips(from, to, date, passengers) {
         let query = supabase
             .from('trips')
             .select(`*, bookings (seat_number, passenger_id, passenger_name, passenger_phone)`)
@@ -10,6 +10,23 @@ class TripService {
 
         if (from) query = query.ilike('from_city', `%${from}%`);
         if (to) query = query.ilike('to_city', `%${to}%`);
+
+
+// 2. Sana bo'yicha (Supabase'da departure_time UTC bo'lsa, date() bilan solishtiramiz)
+    if (date) {
+        // departure_time '2024-05-20T10:00:00' bo'lsa, faqat sanasini solishtiradi
+        query = query.gte('departure_time', `${date}T00:00:00`)
+                     .lte('departure_time', `${date}T23:59:59`);
+    }
+
+    // 3. Yo'lovchilar soni bo'yicha (Bo'sh joylar yetarli bo'lishi kerak)
+    if (passengers) {
+        const pCount = parseInt(passengers);
+        if (!isNaN(pCount)) {
+            query = query.gte('available_seats', pCount);
+        }
+    }
+
 
         const { data, error } = await query;
         if (error) throw error;
