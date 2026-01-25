@@ -1,53 +1,6 @@
 const supabase = require('../config/supabase');
 
-
-class TripService {
-    async fetchTripById(tripId) {
-        const { data: trip, error } = await supabase
-            .from('trips')
-            .select(`*, bookings (seat_number, passenger_id, passenger_name, passenger_phone)`)
-            .eq('id', tripId)
-            .maybeSingle();
-
-        if (error) throw error;
-        if (!trip) return null;
-
-        /**
-         * Senior Logic: O'rindiqlar sxemasini to'ldirish (Hydration).
-         * UI 4 ta o'rindiq kutyapti. Biz band va bo'sh joylarni bitta massivga jamlaymiz.
-         */
-        const totalSeats = 4; // Kelajakda car_model'ga qarab dinamik qilish mumkin
-        const fullSeatsArray = [];
-
-        for (let i = 1; i <= totalSeats; i++) {
-            const booking = trip.bookings.find(b => b.seat_number === i);
-            if (booking) {
-                fullSeatsArray.push({
-                    seat_number: i,
-                    passenger_id: booking.passenger_id,
-                    passenger_name: booking.passenger_name,
-                    passenger_phone: booking.passenger_phone,
-                    status: booking.passenger_id === 'DRIVER_BLOCK' ? 'BLOCKED' : 'BOOKED'
-                });
-            } else {
-                fullSeatsArray.push({
-                    seat_number: i,
-                    passenger_id: null,
-                    passenger_name: null,
-                    status: 'AVAILABLE'
-                });
-            }
-        }
-
-        // Backend modelini Android kutilgan formatga moslash
-        return {
-            ...trip,
-            generated_seats: fullSeatsArray
-        };
-    }
-
-
-class TripService {
+class TripService {// 1. Yangi safar yaratish
     async createTrip(tripData) {
         const {
             driver_id, driver_name, from_city, to_city,
@@ -56,7 +9,7 @@ class TripService {
             start_lat, start_lng, end_lat, end_lng
         } = tripData;
 
-        // Profilni Upsert qilish (FK xatosini oldini oladi)
+        // Profilni yangilash yoki yaratish (Foreign Key xatosini oldini olish uchun)
         await supabase.from('profiles').upsert({
             id: driver_id,
             full_name: driver_name,
@@ -87,6 +40,7 @@ class TripService {
         return data;
     }
 
+    // 2. Barcha safarlarni qidirish va filterlash
     async fetchAllTrips(from, to, date, passengers) {
         let query = supabase
             .from('trips')
@@ -113,27 +67,62 @@ class TripService {
         return data;
     }
 
-    // 🔥 YANGI: ID orqali safarni qidirish mantiqi
+    // 3. ID bo'yicha safar va uning dinamik o'rindiqlarini olish
     async fetchTripById(tripId) {
-        const { data, error } = await supabase
+        const { data: trip, error } = await supabase
             .from('trips')
             .select(`*, bookings (seat_number, passenger_id, passenger_name, passenger_phone)`)
             .eq('id', tripId)
-            .maybeSingle(); // single() o'rniga maybeSingle() - xavfsizroq
+            .maybeSingle();
 
         if (error) throw error;
-        return data;
+        if (!trip) return null;
+
+        /**
+         * Senior Logic: O'rindiqlar sxemasini to'ldirish (Hydration).
+         * Android UI 4 ta o'rindiq kutyapti. Bo'sh va band joylarni birlashtiramiz.
+         */
+        const totalSeats = 4;
+        const fullSeatsArray = [];
+
+        for (let i = 1; i <= totalSeats; i++) {
+            const booking = (trip.bookings || []).find(b => b.seat_number === i);
+            if (booking) {
+                fullSeatsArray.push({
+                    seat_number: i,
+                    passenger_id: booking.passenger_id,
+                    passenger_name: booking.passenger_name,
+                    passenger_phone: booking.passenger_phone,
+                    status: booking.passenger_id === 'DRIVER_BLOCK' ? 'BLOCKED' : 'BOOKED'
+                });
+            } else {
+                fullSeatsArray.push({
+                    seat_number: i,
+                    passenger_id: null,
+                    passenger_name: null,
+                    status: 'AVAILABLE'
+                });
+            }
+        }
+
+        return {
+            ...trip,
+            generated_seats: fullSeatsArray
+        };
     }
 
+    // 4. O'rindiq band qilish
     async bookSeat(tripId, bookingData) {
         const { seatNumber, passengerId, passengerName, passengerPhone } = bookingData;
 
+        // Yo'lovchi profilini upsert qilish
         await supabase.from('profiles').upsert({
             id: passengerId,
             full_name: passengerName,
             phone_number: passengerPhone
         });
 
+        // Joy band yoki yo'qligini tekshirish
         const { data: existing } = await supabase
             .from('bookings')
             .select('id')
@@ -143,6 +132,7 @@ class TripService {
 
         if (existing) throw new Error("Bu o'rindiq allaqachon band!");
 
+        // Safar mavjudligini tekshirish
         const { data: trip, error: tripErr } = await supabase
             .from('trips')
             .select('*')
@@ -152,6 +142,7 @@ class TripService {
         if (tripErr || !trip) throw new Error("Safar topilmadi");
         if (trip.available_seats <= 0) throw new Error("Bo'sh joy qolmagan!");
 
+        // Band qilish
         const { error: bookErr } = await supabase
             .from('bookings')
             .insert([{
@@ -164,11 +155,13 @@ class TripService {
 
         if (bookErr) throw bookErr;
 
+        // Bo'sh joylar sonini kamaytirish
         await supabase
             .from('trips')
             .update({ available_seats: trip.available_seats - 1 })
             .eq('id', tripId);
 
+        // Haydovchiga bildirishnoma (Ixtiyoriy)
         await supabase.from('notifications').insert([{
             user_id: trip.driver_id,
             title: "Yangi yo'lovchi! 🚗",
@@ -180,4 +173,5 @@ class TripService {
     }
 }
 
+// Klassdan bitta instansiya eksport qilinadi (Singleton pattern)
 module.exports = new TripService();
