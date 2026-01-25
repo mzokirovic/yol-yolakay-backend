@@ -49,3 +49,21 @@ exports.cancelSeat = async (req, res) => {
         res.status(400).json({ error: err.message });
     }
 };
+
+exports.getMyDriverTrips = async (req, res) => {
+    try {
+        const data = await TripService.fetchMyDriverTrips(req.query.userId);
+        res.status(200).json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+exports.getMyBookings = async (req, res) => {
+    try {
+        const data = await TripService.fetchMyBookings(req.query.userId);
+        res.status(200).json(data);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};

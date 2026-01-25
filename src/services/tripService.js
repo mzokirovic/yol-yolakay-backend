@@ -108,6 +108,37 @@ class TripService {
         };
     }
 
+
+        async fetchMyDriverTrips(userId) {
+            const { data, error } = await supabase
+                .from('trips')
+                .select(`*, bookings (seat_number, passenger_id, passenger_name)`)
+                .eq('driver_id', userId)
+                .order('departure_time', { ascending: false });
+            if (error) throw error;
+            return data;
+        }
+
+        async fetchMyBookings(userId) {
+            const { data: bookings, error: bError } = await supabase
+                .from('bookings')
+                .select('trip_id')
+                .eq('passenger_id', userId);
+
+            if (bError) throw bError;
+            const tripIds = bookings.map(b => b.trip_id);
+
+            const { data, error } = await supabase
+                .from('trips')
+                .select(`*, bookings (seat_number, passenger_id, passenger_name)`)
+                .in('id', tripIds)
+                .order('departure_time', { ascending: false });
+
+            if (error) throw error;
+            return data;
+        }
+
+
     // 4. O'rindiq band qilish (TUZATILDI: Android Request Contract bilan moslandi)
     async bookSeat(tripId, bookingData) {
         // Android'dan kelayotgan snake_case ma'lumotlarni qabul qilamiz
