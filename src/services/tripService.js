@@ -1,5 +1,52 @@
 const supabase = require('../config/supabase');
 
+
+class TripService {
+    async fetchTripById(tripId) {
+        const { data: trip, error } = await supabase
+            .from('trips')
+            .select(`*, bookings (seat_number, passenger_id, passenger_name, passenger_phone)`)
+            .eq('id', tripId)
+            .maybeSingle();
+
+        if (error) throw error;
+        if (!trip) return null;
+
+        /**
+         * Senior Logic: O'rindiqlar sxemasini to'ldirish (Hydration).
+         * UI 4 ta o'rindiq kutyapti. Biz band va bo'sh joylarni bitta massivga jamlaymiz.
+         */
+        const totalSeats = 4; // Kelajakda car_model'ga qarab dinamik qilish mumkin
+        const fullSeatsArray = [];
+
+        for (let i = 1; i <= totalSeats; i++) {
+            const booking = trip.bookings.find(b => b.seat_number === i);
+            if (booking) {
+                fullSeatsArray.push({
+                    seat_number: i,
+                    passenger_id: booking.passenger_id,
+                    passenger_name: booking.passenger_name,
+                    passenger_phone: booking.passenger_phone,
+                    status: booking.passenger_id === 'DRIVER_BLOCK' ? 'BLOCKED' : 'BOOKED'
+                });
+            } else {
+                fullSeatsArray.push({
+                    seat_number: i,
+                    passenger_id: null,
+                    passenger_name: null,
+                    status: 'AVAILABLE'
+                });
+            }
+        }
+
+        // Backend modelini Android kutilgan formatga moslash
+        return {
+            ...trip,
+            generated_seats: fullSeatsArray
+        };
+    }
+
+
 class TripService {
     async createTrip(tripData) {
         const {
