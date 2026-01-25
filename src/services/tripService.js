@@ -131,74 +131,45 @@ class TripService {
     }
 
     // 6. O'rindiq band qilish (TUZATILDI - BULLETPROOF)
-    async bookSeat(tripId, bookingData) {
-        // 🔥 HAR QANDAY FORMATDAN MA'LUMOTNI SUG'URIB OLAMIZ
-        const seat_number = bookingData.seat_number || bookingData.seatNumber;
-        const passenger_id = bookingData.passenger_id || bookingData.passengerId;
-        const passenger_name = bookingData.passenger_name || bookingData.passengerName;
-        const passenger_phone = bookingData.passenger_phone || bookingData.passengerPhone;
+    a    async bookSeat(tripId, bookingData) {
+             const seat_number = bookingData.seat_number || bookingData.seatNumber;
+             const passenger_id = bookingData.passenger_id || bookingData.passengerId;
+             const passenger_name = bookingData.passenger_name || bookingData.passengerName;
 
-        // 🚨 MUHIM: Integerga o'girish (SQL null xatosini oldini olish uchun)
-        const finalSeatNumber = parseInt(seat_number);
+             const finalSeatNumber = parseInt(seat_number);
 
-        if (isNaN(finalSeatNumber)) {
-            console.error("DEBUG: seat_number kelmadi yoki noto'g'ri:", bookingData);
-            throw new Error("O'rindiq raqami ko'rsatilmagan (seat_number is required)");
-        }
+             // 🚨 SENIOR LOGIC: Haydovchi bloklayaptimi yoki yo'lovchi band qilyaptimi?
+             const isDriverBlocking = (passenger_id === 'DRIVER_BLOCK' || bookingData.isDriver);
 
-        // 1. Profilni yangilash
-        if (passenger_id !== 'DRIVER_BLOCK') {
-            await supabase.from('profiles').upsert({
-                id: passenger_id,
-                full_name: passenger_name,
-                phone_number: passenger_phone
-            });
-        }
+             // 1. Agar bu haydovchi bo'lsa, "passenger_name"ni "BAND QILINGAN" deb qo'yamiz
+             const finalName = isDriverBlocking ? "Yopilgan joy" : passenger_name;
 
-        // 2. Takroriy band qilishni tekshirish
-        const { data: existing } = await supabase
-            .from('bookings')
-            .select('id')
-            .eq('trip_id', tripId)
-            .eq('seat_number', finalSeatNumber)
-            .maybeSingle();
+             // 2. Insert qilish
+             const { error: bookErr } = await supabase
+                 .from('bookings')
+                 .insert([{
+                     trip_id: tripId,
+                     seat_number: finalSeatNumber,
+                     passenger_id: isDriverBlocking ? 'DRIVER_BLOCK' : passenger_id,
+                     passenger_name: finalName,
+                     passenger_phone: isDriverBlocking ? '' : (bookingData.passenger_phone || bookingData.passengerPhone)
+                 }]);
 
-        if (existing) throw new Error("Bu o'rindiq allaqachon band!");
+             if (bookErr) throw bookErr;
 
-        // 3. Safar mavjudligi
-        const { data: trip, error: tripErr } = await supabase
-            .from('trips')
-            .select('*')
-            .eq('id', tripId)
-            .single();
+             // 3. MUHIM: Agar YO'LOVCHI band qilsa, "available_seats"ni kamaytiramiz.
+             // Agar HAYDOVCHI shunchaki yopib qo'ysa, "available_seats" kamaymaydi (chunki bu sotilgan joy emas).
+             if (!isDriverBlocking) {
+                 const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', tripId).single();
+                 if (trip) {
+                     await supabase.from('trips')
+                         .update({ available_seats: trip.available_seats - 1 })
+                         .eq('id', tripId);
+                 }
+             }
 
-        if (tripErr || !trip) throw new Error("Safar topilmadi");
-        if (passenger_id !== 'DRIVER_BLOCK' && trip.available_seats <= 0) {
-            throw new Error("Bo'sh joy qolmagan!");
-        }
-
-        // 4. DATABASE INSERT (Qat'iy turdagi ma'lumotlar bilan)
-        const { error: bookErr } = await supabase
-            .from('bookings')
-            .insert([{
-                trip_id: tripId,
-                seat_number: finalSeatNumber, // Integer
-                passenger_id: passenger_id,
-                passenger_name: passenger_name,
-                passenger_phone: passenger_phone
-            }]);
-
-        if (bookErr) throw bookErr;
-
-        // 5. Joylar sonini yangilash
-        if (passenger_id !== 'DRIVER_BLOCK') {
-            await supabase
-                .from('trips')
-                .update({ available_seats: trip.available_seats - 1 })
-                .eq('id', tripId);
-        }
-
-        return { success: true };
+             return { success: true };
+         }
     }
 
     // 7. Joyni bekor qilish
