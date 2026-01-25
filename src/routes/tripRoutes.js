@@ -13,4 +13,7 @@ router.post('/', TripController.createTrip);
 // Joy band qilish
 router.post('/:id/book-seat', TripController.bookSeat);
 
+// 🔥 YANGI: Joy bandini bekor qilish
+router.post('/:id/cancel-seat', TripController.cancelSeat);
+
 module.exports = router;
