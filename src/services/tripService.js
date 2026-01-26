@@ -235,5 +235,3 @@ app.use('/api/trips', require('./src/routes/tripRoutes'));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`🚀 Senior Backend on port ${PORT}`));
-
- to'liq full kod ber
