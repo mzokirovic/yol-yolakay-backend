@@ -2,66 +2,71 @@ const supabase = require('../config/supabase');
 
 class TripService {
     /**
-     * 1. Yangi safar yaratish
+     * 1. Yangi safar yaratish (Enhanced for stability)
      * Android DTO dan kelayotgan snake_case maydonlarni qabul qiladi.
      */
     async createTrip(tripData) {
-        // Androiddan kelayotgan snake_case maydonlar
         const {
-            driver_id,
-            driver_name,
-            phone_number,
-            from_city,
-            to_city,
-            price,
-            available_seats,
-            departure_time,
-            car_model,
-            start_lat,
-            start_lng,
-            end_lat,
-            end_lng
+            driver_id, driver_name, phone_number,
+            from_city, to_city, price, available_seats,
+            departure_time, car_model,
+            start_lat, start_lng, end_lat, end_lng
         } = tripData;
 
         try {
-            // Haydovchi profilini yangilash yoki yaratish
+            // A. Haydovchi profilini yangilash (Background task)
             if (driver_id) {
                 await supabase.from('profiles').upsert({
                     id: driver_id,
                     full_name: driver_name || "Noma'lum",
                     phone_number: phone_number || "",
                     car_model: car_model || ""
-                });
+                }).catch(e => console.error("Profile Upsert Minor Error:", e.message));
             }
 
-            // Safarni yaratish (Database ustun nomlariga aniq moslangan)
+            // B. Database Payload tayyorlash (Mapping logic)
+            // Ikkala formatni ham to'ldiramiz (camelCase va snake_case)
+            const payload = {
+                driver_id: driver_id,
+                driver_name: driver_name,
+                phone_number: phone_number,
+                car_model: car_model,
+                from_city: from_city,
+                to_city: to_city,
+                departure_time: departure_time,
+                price: parseFloat(price) || 0,
+                available_seats: parseInt(available_seats) || 1,
+
+                // Snake Case columns
+                start_lat: parseFloat(start_lat) || null,
+                start_lng: parseFloat(start_lng) || null,
+                end_lat: parseFloat(end_lat) || null,
+                end_lng: parseFloat(end_lng) || null,
+
+                // Camel Case columns (Bazadagi startLat kabi ustunlar uchun)
+                startLat: parseFloat(start_lat) || null,
+                startLng: parseFloat(start_lng) || null,
+                endLat: parseFloat(end_lat) || null,
+                endLng: parseFloat(end_lng) || null
+            };
+
+            // C. Safarni yaratish
             const { data, error } = await supabase
                 .from('trips')
-                .insert([{
-                    driver_id,
-                    driver_name,
-                    phone_number,
-                    from_city,
-                    to_city,
-                    price: parseFloat(price) || 0,
-                    available_seats: parseInt(available_seats) || 1,
-                    departure_time,
-                    car_model,
-                    start_lat: parseFloat(start_lat) || null,
-                    start_lng: parseFloat(start_lng) || null,
-                    end_lat: parseFloat(end_lat) || null,
-                    end_lng: parseFloat(end_lng) || null
-                }])
+                .insert([payload])
                 .select()
                 .single();
 
             if (error) {
-                console.error("Supabase Insert Error:", error.message);
+                console.error("❌ Supabase INSERT FAILED:", error.message, "Payload:", payload);
                 throw error;
             }
+
+            console.log("✅ Trip Created Successfully:", data.id);
             return data;
+
         } catch (err) {
-            console.error("TripService.createTrip Catch:", err.message);
+            console.error("❌ TripService.createTrip CRITICAL ERROR:", err.message);
             throw err;
         }
     }
@@ -94,7 +99,7 @@ class TripService {
     }
 
     /**
-     * 3. ID bo'yicha safar (Dinamik o'rindiqlar generatsiyasi bilan)
+     * 3. ID bo'yicha safar (Dinamik o'rindiqlar generatsiyasi)
      */
     async fetchTripById(tripId) {
         const { data: trip, error } = await supabase
