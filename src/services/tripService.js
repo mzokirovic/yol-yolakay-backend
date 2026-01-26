@@ -1,51 +1,69 @@
-src/services/tripService.js : const supabase = require('../config/supabase');
+const supabase = require('../config/supabase');
 
 class TripService {
     /**
      * 1. Yangi safar yaratish
-     * Android ilovadan kelayotgan camelCase maydonlarni snake_case ga o'girib saqlaydi.
+     * Android DTO dan kelayotgan snake_case maydonlarni qabul qiladi.
      */
     async createTrip(tripData) {
+        // Androiddan kelayotgan snake_case maydonlar
         const {
-            driverId, driverName, driverPhone,
-            fromCity, toCity, price, availableSeats,
-            departureTime, carModel,
-            startLat, startLng, endLat, endLng
+            driver_id,
+            driver_name,
+            phone_number,
+            from_city,
+            to_city,
+            price,
+            available_seats,
+            departure_time,
+            car_model,
+            start_lat,
+            start_lng,
+            end_lat,
+            end_lng
         } = tripData;
 
-        // Haydovchi profilini yangilash yoki yaratish
-        await supabase.from('profiles').upsert({
-            id: driverId,
-            full_name: driverName,
-            phone_number: driverPhone,
-            car_model: carModel
-        });
+        try {
+            // Haydovchi profilini yangilash yoki yaratish
+            if (driver_id) {
+                await supabase.from('profiles').upsert({
+                    id: driver_id,
+                    full_name: driver_name || "Noma'lum",
+                    phone_number: phone_number || "",
+                    car_model: car_model || ""
+                });
+            }
 
-        // Safarni yaratish (Database ustun nomlariga moslangan)
-        const { data, error } = await supabase
-            .from('trips')
-            .insert([{
-                driver_id: driverId,
-                driver_name: driverName,
-                phone_number: driverPhone,
-                from_city: fromCity,
-                to_city: toCity,
-                price: price,
-                available_seats: availableSeats,
-                departure_time: departureTime, // Androiddan kelgan ISO String
-                car_model: carModel,
-                start_lat: startLat,
-                start_lng: startLng,
-                end_lat: endLat,
-                end_lng: endLng
-            }])
-            .select().single();
+            // Safarni yaratish (Database ustun nomlariga aniq moslangan)
+            const { data, error } = await supabase
+                .from('trips')
+                .insert([{
+                    driver_id,
+                    driver_name,
+                    phone_number,
+                    from_city,
+                    to_city,
+                    price: parseFloat(price) || 0,
+                    available_seats: parseInt(available_seats) || 1,
+                    departure_time,
+                    car_model,
+                    start_lat: parseFloat(start_lat) || null,
+                    start_lng: parseFloat(start_lng) || null,
+                    end_lat: parseFloat(end_lat) || null,
+                    end_lng: parseFloat(end_lng) || null
+                }])
+                .select()
+                .single();
 
-        if (error) {
-            console.error("Supabase Create Error:", error);
-            throw error;
+            if (error) {
+                console.error("Supabase Insert Error:", error.message);
+                throw error;
+            }
+            return data;
+        } catch (err) {
+            console.error("TripService.createTrip Catch:", err.message);
+            throw err;
         }
-        return data;
     }
 
     /**
@@ -61,7 +79,6 @@ class TripService {
         if (to && to.trim() !== "") query = query.ilike('to_city', `%${to}%`);
 
         if (date) {
-            // Androiddan kelgan YYYY-MM-DD formatiga vaqt oralig'ini qo'shish
             query = query.gte('departure_time', `${date}T00:00:00`)
                          .lte('departure_time', `${date}T23:59:59`);
         }
@@ -78,7 +95,6 @@ class TripService {
 
     /**
      * 3. ID bo'yicha safar (Dinamik o'rindiqlar generatsiyasi bilan)
-     * Senior Fix: totalSeats endi qat'iy 4 emas, e'longa qarab o'zgaradi.
      */
     async fetchTripById(tripId) {
         const { data: trip, error } = await supabase
@@ -90,9 +106,8 @@ class TripService {
         if (error) throw error;
         if (!trip) return null;
 
-        // Jami joylar = Hozirgi bo'sh joylar + Band qilingan joylar soni
         const bookedSeats = trip.bookings || [];
-        const totalSeats = trip.available_seats + bookedSeats.length;
+        const totalSeats = (trip.available_seats || 0) + bookedSeats.length;
 
         const fullSeatsArray = [];
         for (let i = 1; i <= totalSeats; i++) {
@@ -118,18 +133,17 @@ class TripService {
     }
 
     /**
-     * 4. O'rindiqni band qilish (Bulletproof)
+     * 4. O'rindiqni band qilish
      */
     async bookSeat(tripId, bookingData) {
-        const seat_number = bookingData.seatNumber || bookingData.seat_number;
-        const passenger_id = bookingData.passengerId || bookingData.passenger_id;
-        const passenger_name = bookingData.passengerName || bookingData.passenger_name;
-        const passenger_phone = bookingData.passengerPhone || bookingData.passenger_phone;
+        const seat_number = bookingData.seat_number || bookingData.seatNumber;
+        const passenger_id = bookingData.passenger_id || bookingData.passengerId;
+        const passenger_name = bookingData.passenger_name || bookingData.passengerName;
+        const passenger_phone = bookingData.passenger_phone || bookingData.passengerPhone;
 
         const finalSeatNumber = parseInt(seat_number);
-        const isDriverBlocking = (passenger_id === 'DRIVER_BLOCK' || bookingData.isDriver);
+        const isDriverBlocking = (passenger_id === 'DRIVER_BLOCK');
 
-        // 1. Band qilish
         const { error: bookErr } = await supabase
             .from('bookings')
             .insert([{
@@ -142,7 +156,6 @@ class TripService {
 
         if (bookErr) throw bookErr;
 
-        // 2. Agar yo'lovchi bo'lsa, mavjud joylarni kamaytirish
         if (!isDriverBlocking) {
             const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', tripId).single();
             if (trip && trip.available_seats > 0) {
@@ -159,7 +172,7 @@ class TripService {
      * 5. Joyni bekor qilish
      */
     async cancelSeat(tripId, cancelData) {
-        const seat_number = cancelData.seatNumber || cancelData.seat_number;
+        const seat_number = cancelData.seat_number || cancelData.seatNumber;
         const finalSeatNumber = parseInt(seat_number);
 
         const { data: booking, error: findErr } = await supabase
@@ -179,7 +192,6 @@ class TripService {
 
         if (delErr) throw delErr;
 
-        // Agar yo'lovchi joyi bekor bo'lsa, joyni qaytaramiz
         if (booking.passenger_id !== 'DRIVER_BLOCK') {
             const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', tripId).single();
             if (trip) {
@@ -222,16 +234,4 @@ class TripService {
     }
 }
 
-module.exports = new TripService();  index.js : const express = require('express');
-const cors = require('cors');
-require('dotenv').config();
-
-const app = express();
-app.use(cors());
-app.use(express.json());
-
-// Routes
-app.use('/api/trips', require('./src/routes/tripRoutes'));
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Senior Backend on port ${PORT}`));
+module.exports = new TripService();
