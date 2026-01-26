@@ -1,46 +1,56 @@
 const supabase = require('../config/supabase');
 
 class TripService {
-    // 1. Yangi safar yaratish
+    /**
+     * 1. Yangi safar yaratish
+     * Android ilovadan kelayotgan camelCase maydonlarni snake_case ga o'girib saqlaydi.
+     */
     async createTrip(tripData) {
         const {
-            driver_id, driver_name, from_city, to_city,
-            price, available_seats, departure_time,
-            car_model, driver_phone,
-            start_lat, start_lng, end_lat, end_lng
+            driverId, driverName, driverPhone,
+            fromCity, toCity, price, availableSeats,
+            departureTime, carModel,
+            startLat, startLng, endLat, endLng
         } = tripData;
 
+        // Haydovchi profilini yangilash yoki yaratish
         await supabase.from('profiles').upsert({
-            id: driver_id,
-            full_name: driver_name,
-            phone_number: driver_phone,
-            car_model: car_model
+            id: driverId,
+            full_name: driverName,
+            phone_number: driverPhone,
+            car_model: carModel
         });
 
+        // Safarni yaratish (Database ustun nomlariga moslangan)
         const { data, error } = await supabase
             .from('trips')
             .insert([{
-                driver_id,
-                driver_name,
-                from_city,
-                to_city,
-                price,
-                available_seats,
-                departure_time,
-                car_model,
-                phone_number: driver_phone,
-                start_lat,
-                start_lng,
-                end_lat,
-                end_lng
+                driver_id: driverId,
+                driver_name: driverName,
+                phone_number: driverPhone,
+                from_city: fromCity,
+                to_city: toCity,
+                price: price,
+                available_seats: availableSeats,
+                departure_time: departureTime, // Androiddan kelgan ISO String
+                car_model: carModel,
+                start_lat: startLat,
+                start_lng: startLng,
+                end_lat: endLat,
+                end_lng: endLng
             }])
             .select().single();
 
-        if (error) throw error;
+        if (error) {
+            console.error("Supabase Create Error:", error);
+            throw error;
+        }
         return data;
     }
 
-    // 2. Barcha safarlarni qidirish
+    /**
+     * 2. Safarlarni qidirish
+     */
     async fetchAllTrips(from, to, date, passengers) {
         let query = supabase
             .from('trips')
@@ -49,10 +59,13 @@ class TripService {
 
         if (from && from.trim() !== "") query = query.ilike('from_city', `%${from}%`);
         if (to && to.trim() !== "") query = query.ilike('to_city', `%${to}%`);
+
         if (date) {
+            // Androiddan kelgan YYYY-MM-DD formatiga vaqt oralig'ini qo'shish
             query = query.gte('departure_time', `${date}T00:00:00`)
                          .lte('departure_time', `${date}T23:59:59`);
         }
+
         if (passengers) {
             const pCount = parseInt(passengers);
             if (!isNaN(pCount)) query = query.gte('available_seats', pCount);
@@ -63,7 +76,10 @@ class TripService {
         return data;
     }
 
-    // 3. ID bo'yicha safar (Hydration bilan)
+    /**
+     * 3. ID bo'yicha safar (Dinamik o'rindiqlar generatsiyasi bilan)
+     * Senior Fix: totalSeats endi qat'iy 4 emas, e'longa qarab o'zgaradi.
+     */
     async fetchTripById(tripId) {
         const { data: trip, error } = await supabase
             .from('trips')
@@ -74,10 +90,13 @@ class TripService {
         if (error) throw error;
         if (!trip) return null;
 
-        const totalSeats = 4;
+        // Jami joylar = Hozirgi bo'sh joylar + Band qilingan joylar soni
+        const bookedSeats = trip.bookings || [];
+        const totalSeats = trip.available_seats + bookedSeats.length;
+
         const fullSeatsArray = [];
         for (let i = 1; i <= totalSeats; i++) {
-            const booking = (trip.bookings || []).find(b => parseInt(b.seat_number) === i);
+            const booking = bookedSeats.find(b => parseInt(b.seat_number) === i);
             if (booking) {
                 fullSeatsArray.push({
                     seat_number: i,
@@ -98,84 +117,49 @@ class TripService {
         return { ...trip, generated_seats: fullSeatsArray };
     }
 
-    // 4. Mening haydovchi sifatidagi safarlarim
-    async fetchMyDriverTrips(userId) {
-        const { data, error } = await supabase
-            .from('trips')
-            .select(`*, bookings (seat_number, passenger_id, passenger_name)`)
-            .eq('driver_id', userId)
-            .order('departure_time', { ascending: false });
-        if (error) throw error;
-        return data;
-    }
+    /**
+     * 4. O'rindiqni band qilish (Bulletproof)
+     */
+    async bookSeat(tripId, bookingData) {
+        const seat_number = bookingData.seatNumber || bookingData.seat_number;
+        const passenger_id = bookingData.passengerId || bookingData.passenger_id;
+        const passenger_name = bookingData.passengerName || bookingData.passenger_name;
+        const passenger_phone = bookingData.passengerPhone || bookingData.passenger_phone;
 
-    // 5. Mening yo'lovchi sifatidagi buyurtmalarim
-    async fetchMyBookings(userId) {
-        const { data: bookings, error: bError } = await supabase
+        const finalSeatNumber = parseInt(seat_number);
+        const isDriverBlocking = (passenger_id === 'DRIVER_BLOCK' || bookingData.isDriver);
+
+        // 1. Band qilish
+        const { error: bookErr } = await supabase
             .from('bookings')
-            .select('trip_id')
-            .eq('passenger_id', userId);
+            .insert([{
+                trip_id: tripId,
+                seat_number: finalSeatNumber,
+                passenger_id: isDriverBlocking ? 'DRIVER_BLOCK' : passenger_id,
+                passenger_name: isDriverBlocking ? "Yopilgan joy" : passenger_name,
+                passenger_phone: isDriverBlocking ? '' : passenger_phone
+            }]);
 
-        if (bError) throw bError;
-        const tripIds = [...new Set(bookings.map(b => b.trip_id))];
-        if (tripIds.length === 0) return [];
+        if (bookErr) throw bookErr;
 
-        const { data, error } = await supabase
-            .from('trips')
-            .select(`*, bookings (seat_number, passenger_id, passenger_name)`)
-            .in('id', tripIds)
-            .order('departure_time', { ascending: false });
+        // 2. Agar yo'lovchi bo'lsa, mavjud joylarni kamaytirish
+        if (!isDriverBlocking) {
+            const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', tripId).single();
+            if (trip && trip.available_seats > 0) {
+                await supabase.from('trips')
+                    .update({ available_seats: trip.available_seats - 1 })
+                    .eq('id', tripId);
+            }
+        }
 
-        if (error) throw error;
-        return data;
+        return { success: true };
     }
 
-    // 6. O'rindiq band qilish (TUZATILDI - BULLETPROOF)
-    a    async bookSeat(tripId, bookingData) {
-             const seat_number = bookingData.seat_number || bookingData.seatNumber;
-             const passenger_id = bookingData.passenger_id || bookingData.passengerId;
-             const passenger_name = bookingData.passenger_name || bookingData.passengerName;
-
-             const finalSeatNumber = parseInt(seat_number);
-
-             // 🚨 SENIOR LOGIC: Haydovchi bloklayaptimi yoki yo'lovchi band qilyaptimi?
-             const isDriverBlocking = (passenger_id === 'DRIVER_BLOCK' || bookingData.isDriver);
-
-             // 1. Agar bu haydovchi bo'lsa, "passenger_name"ni "BAND QILINGAN" deb qo'yamiz
-             const finalName = isDriverBlocking ? "Yopilgan joy" : passenger_name;
-
-             // 2. Insert qilish
-             const { error: bookErr } = await supabase
-                 .from('bookings')
-                 .insert([{
-                     trip_id: tripId,
-                     seat_number: finalSeatNumber,
-                     passenger_id: isDriverBlocking ? 'DRIVER_BLOCK' : passenger_id,
-                     passenger_name: finalName,
-                     passenger_phone: isDriverBlocking ? '' : (bookingData.passenger_phone || bookingData.passengerPhone)
-                 }]);
-
-             if (bookErr) throw bookErr;
-
-             // 3. MUHIM: Agar YO'LOVCHI band qilsa, "available_seats"ni kamaytiramiz.
-             // Agar HAYDOVCHI shunchaki yopib qo'ysa, "available_seats" kamaymaydi (chunki bu sotilgan joy emas).
-             if (!isDriverBlocking) {
-                 const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', tripId).single();
-                 if (trip) {
-                     await supabase.from('trips')
-                         .update({ available_seats: trip.available_seats - 1 })
-                         .eq('id', tripId);
-                 }
-             }
-
-             return { success: true };
-         }
-    }
-
-    // 7. Joyni bekor qilish
+    /**
+     * 5. Joyni bekor qilish
+     */
     async cancelSeat(tripId, cancelData) {
-        const seat_number = cancelData.seat_number || cancelData.seatNumber;
-        const user_id = cancelData.user_id || cancelData.userId;
+        const seat_number = cancelData.seatNumber || cancelData.seat_number;
         const finalSeatNumber = parseInt(seat_number);
 
         const { data: booking, error: findErr } = await supabase
@@ -195,16 +179,46 @@ class TripService {
 
         if (delErr) throw delErr;
 
+        // Agar yo'lovchi joyi bekor bo'lsa, joyni qaytaramiz
         if (booking.passenger_id !== 'DRIVER_BLOCK') {
             const { data: trip } = await supabase.from('trips').select('available_seats').eq('id', tripId).single();
             if (trip) {
-                await supabase
-                    .from('trips')
+                await supabase.from('trips')
                     .update({ available_seats: trip.available_seats + 1 })
                     .eq('id', tripId);
             }
         }
         return { success: true };
+    }
+
+    async fetchMyDriverTrips(userId) {
+        const { data, error } = await supabase
+            .from('trips')
+            .select(`*, bookings (seat_number, passenger_id, passenger_name)`)
+            .eq('driver_id', userId)
+            .order('departure_time', { ascending: false });
+        if (error) throw error;
+        return data;
+    }
+
+    async fetchMyBookings(userId) {
+        const { data: bookings, error: bError } = await supabase
+            .from('bookings')
+            .select('trip_id')
+            .eq('passenger_id', userId);
+
+        if (bError) throw bError;
+        const tripIds = [...new Set(bookings.map(b => b.trip_id))];
+        if (tripIds.length === 0) return [];
+
+        const { data, error } = await supabase
+            .from('trips')
+            .select(`*, bookings (seat_number, passenger_id, passenger_name)`)
+            .in('id', tripIds)
+            .order('departure_time', { ascending: false });
+
+        if (error) throw error;
+        return data;
     }
 }
 
