@@ -31,11 +31,19 @@ function ensure(value, fieldName) {
   return value;
 }
 
+function toServiceError(supabaseError, fallbackStatus = 400) {
+  // Supabase error ko'pincha { message, code, details, hint } bo'ladi
+  const msg = supabaseError?.message || 'Unknown error';
+  const err = new Error(msg);
+  err.status = fallbackStatus;
+  return err;
+}
+
 class TripService {
   /**
-   * 1) Create Trip (driver)
-   * - validate required fields
-   * - keep snake_case only (camelCase dublikatlarni bazadan yo‘qotsang yanada yaxshi)
+   * 1) Create Trip (driver) — MVP
+   * Hozircha clientdan driver_name/phone/car_model kelishi mumkin.
+   * Keyin auth/profile qo'shilganda bu 3 tasini profile'dan olamiz.
    */
   async createTrip(tripData) {
     const driver_id = ensure(tripData.driver_id, 'driver_id');
@@ -48,23 +56,33 @@ class TripService {
     const car_model = tripData.car_model || "";
 
     const price = tripData.price !== undefined ? toFloat(tripData.price, 'price') : 0;
-    const available_seats = tripData.available_seats !== undefined ? toInt(tripData.available_seats, 'available_seats') : 1;
+
+    // MVP: client yuborgan available_seats'ni qabul qilamiz (keyin seats_total bilan standart qilamiz)
+    const available_seats =
+      tripData.available_seats !== undefined ? toInt(tripData.available_seats, 'available_seats') : 1;
 
     const start_lat = tripData.start_lat !== undefined ? Number.parseFloat(tripData.start_lat) : null;
     const start_lng = tripData.start_lng !== undefined ? Number.parseFloat(tripData.start_lng) : null;
     const end_lat = tripData.end_lat !== undefined ? Number.parseFloat(tripData.end_lat) : null;
     const end_lng = tripData.end_lng !== undefined ? Number.parseFloat(tripData.end_lng) : null;
 
-    // Update profile (best-effort)
-    await supabase
-      .from('profiles')
-      .upsert({
-        id: driver_id,
-        full_name: driver_name,
-        phone_number,
-        car_model
-      })
-      .catch(e => console.error("Profile upsert warning:", e.message));
+    // Update profile (best-effort) — MUHIM: .catch() ishlatmaymiz
+    try {
+      const { error: profErr } = await supabase
+        .from('profiles')
+        .upsert({
+          id: driver_id,
+          full_name: driver_name,
+          phone_number,
+          car_model
+        });
+
+      if (profErr) {
+        console.warn("Profile upsert warning:", profErr.message);
+      }
+    } catch (e) {
+      console.warn("Profile upsert warning:", e?.message || e);
+    }
 
     const payload = {
       driver_id,
@@ -90,8 +108,9 @@ class TripService {
 
     if (error) {
       console.error("Trip create error:", error.message);
-      throw error;
+      throw toServiceError(error, 400);
     }
+
     return data;
   }
 
@@ -108,7 +127,8 @@ class TripService {
     if (to && to.trim() !== "") query = query.ilike('to_city', `%${to}%`);
 
     if (date) {
-      query = query.gte('departure_time', `${date}T00:00:00`)
+      query = query
+        .gte('departure_time', `${date}T00:00:00`)
         .lte('departure_time', `${date}T23:59:59`);
     }
 
@@ -118,7 +138,7 @@ class TripService {
     }
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) throw toServiceError(error, 400);
     return data;
   }
 
@@ -132,7 +152,7 @@ class TripService {
       .eq('id', tripId)
       .maybeSingle();
 
-    if (error) throw error;
+    if (error) throw toServiceError(error, 400);
     return trip;
   }
 
@@ -168,24 +188,15 @@ class TripService {
       }
     }
 
-    // return includes driver_id always (trip has it)
     return { ...trip, generated_seats: fullSeatsArray };
   }
 
-  /**
-   * helper: who is requester
-   * - prefer header userId (controller passes it)
-   */
   _resolveRequesterId(requesterId, bookingPassengerId) {
     return requesterId || bookingPassengerId || null;
   }
 
   /**
    * 4) Book seat OR Driver block seat
-   * Rules:
-   * - seat already taken => 409
-   * - passenger can't book BLOCKED
-   * - driver can block only if requester == trip.driver_id
    */
   async bookSeat(tripId, bookingData, requesterId) {
     const seat_number = bookingData.seat_number ?? bookingData.seatNumber;
@@ -210,7 +221,6 @@ class TripService {
       throw err;
     }
 
-    // If blocking, only driver can block
     if (isDriverBlocking) {
       if (trip.driver_id !== actualRequester) {
         const err = new Error("Faqat haydovchi joyni yopishi mumkin");
@@ -219,7 +229,6 @@ class TripService {
       }
     }
 
-    // Check if seat already exists
     const { data: existing, error: existErr } = await supabase
       .from('bookings')
       .select('id, passenger_id')
@@ -227,14 +236,13 @@ class TripService {
       .eq('seat_number', finalSeatNumber)
       .maybeSingle();
 
-    if (existErr) throw existErr;
+    if (existErr) throw toServiceError(existErr, 400);
     if (existing) {
       const err = new Error("Bu joy allaqachon band qilingan");
       err.status = 409;
       throw err;
     }
 
-    // If passenger booking, ensure available seats > 0
     if (!isDriverBlocking) {
       if ((trip.available_seats || 0) <= 0) {
         const err = new Error("Bo‘sh joy qolmagan");
@@ -243,7 +251,6 @@ class TripService {
       }
     }
 
-    // Insert booking
     const insertPayload = {
       trip_id: tripId,
       seat_number: finalSeatNumber,
@@ -257,22 +264,20 @@ class TripService {
       .insert([insertPayload]);
 
     if (bookErr) {
-      // If unique constraint exists, this catches race -> convert to 409
       if (String(bookErr.message || "").toLowerCase().includes('duplicate')) {
         const err = new Error("Bu joy allaqachon band qilingan");
         err.status = 409;
         throw err;
       }
-      throw bookErr;
+      throw toServiceError(bookErr, 400);
     }
 
-    // Decrement available seats only for passenger booking
     if (!isDriverBlocking) {
       const { error: updErr } = await supabase
         .from('trips')
         .update({ available_seats: (trip.available_seats || 0) - 1 })
         .eq('id', tripId);
-      if (updErr) throw updErr;
+      if (updErr) throw toServiceError(updErr, 400);
     }
 
     return { success: true };
@@ -280,9 +285,6 @@ class TripService {
 
   /**
    * 5) Cancel seat OR Unblock
-   * Rules:
-   * - only driver can unblock DRIVER_BLOCK
-   * - passenger cancellation MVP: allow (later enforce ownership)
    */
   async cancelSeat(tripId, cancelData, requesterId) {
     const seat_number = cancelData.seat_number ?? cancelData.seatNumber;
@@ -302,7 +304,7 @@ class TripService {
       .eq('seat_number', finalSeatNumber)
       .maybeSingle();
 
-    if (findErr) throw findErr;
+    if (findErr) throw toServiceError(findErr, 400);
     if (!booking) {
       const err = new Error("Band qilingan joy topilmadi");
       err.status = 404;
@@ -311,7 +313,6 @@ class TripService {
 
     const actualRequester = requesterId || null;
 
-    // If seat is blocked, only driver can unblock
     if (booking.passenger_id === DRIVER_BLOCK) {
       if (!actualRequester || trip.driver_id !== actualRequester) {
         const err = new Error("Faqat haydovchi yopilgan joyni ochishi mumkin");
@@ -326,15 +327,14 @@ class TripService {
       .eq('trip_id', tripId)
       .eq('seat_number', finalSeatNumber);
 
-    if (delErr) throw delErr;
+    if (delErr) throw toServiceError(delErr, 400);
 
-    // Increment available seats only if it was a real passenger booking
     if (booking.passenger_id !== DRIVER_BLOCK) {
       const { error: updErr } = await supabase
         .from('trips')
         .update({ available_seats: (trip.available_seats || 0) + 1 })
         .eq('id', tripId);
-      if (updErr) throw updErr;
+      if (updErr) throw toServiceError(updErr, 400);
     }
 
     return { success: true };
@@ -347,7 +347,7 @@ class TripService {
       .eq('driver_id', userId)
       .order('departure_time', { ascending: false });
 
-    if (error) throw error;
+    if (error) throw toServiceError(error, 400);
     return data;
   }
 
@@ -357,7 +357,7 @@ class TripService {
       .select('trip_id')
       .eq('passenger_id', userId);
 
-    if (bError) throw bError;
+    if (bError) throw toServiceError(bError, 400);
 
     const tripIds = [...new Set((bookings || []).map(b => b.trip_id))];
     if (tripIds.length === 0) return [];
@@ -368,7 +368,7 @@ class TripService {
       .in('id', tripIds)
       .order('departure_time', { ascending: false });
 
-    if (error) throw error;
+    if (error) throw toServiceError(error, 400);
     return data;
   }
 }
