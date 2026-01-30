@@ -32,7 +32,6 @@ function ensure(value, fieldName) {
 }
 
 function toServiceError(supabaseError, fallbackStatus = 400) {
-  // Supabase error ko'pincha { message, code, details, hint } bo'ladi
   const msg = supabaseError?.message || 'Unknown error';
   const err = new Error(msg);
   err.status = fallbackStatus;
@@ -66,7 +65,7 @@ class TripService {
     const end_lat = tripData.end_lat !== undefined ? Number.parseFloat(tripData.end_lat) : null;
     const end_lng = tripData.end_lng !== undefined ? Number.parseFloat(tripData.end_lng) : null;
 
-    // Update profile (best-effort) — MUHIM: .catch() ishlatmaymiz
+    // Update profile (best-effort)
     try {
       const { error: profErr } = await supabase
         .from('profiles')
@@ -109,6 +108,24 @@ class TripService {
     if (error) {
       console.error("Trip create error:", error.message);
       throw toServiceError(error, 400);
+    }
+
+    // ✅ Driver seat auto-block (seat 1) — best-effort MVP
+    // BLOCKED status TripDetail'da faqat bookings'da DRIVER_BLOCK bo'lsa chiqadi.
+    try {
+      await this.bookSeat(
+        data.id,
+        {
+          seat_number: 1,
+          passenger_id: DRIVER_BLOCK,
+          passenger_name: "Yopilgan joy",
+          passenger_phone: ""
+        },
+        driver_id // requesterId sifatida driver
+      );
+    } catch (e) {
+      // Trip yaratildi, lekin block yiqilsa ham MVP'ni yiqitmaymiz
+      console.warn("Driver seat auto-block failed:", e?.message || e);
     }
 
     return data;
