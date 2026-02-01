@@ -1,62 +1,62 @@
 const supabase = require('../config/supabase');
 
 exports.createTrip = async (data) => {
-  // 1. Androiddan kelayotgan JSON
-  const {
-    fromLocation, // Android: "Toshkent"
-    toLocation,   // Android: "Samarqand"
-    date,         // Android: "2026-02-02"
-    time,         // Android: "10:30"
-    price,
-    seats,
-    driverId,     // Android: "uuid-code..."
-    fromLat, fromLng,
-    toLat, toLng
-  } = data;
+  console.log("🛠 Servisga kelgan xom ma'lumot:", data);
 
-  // 2. Bazaga moslash (Mapping)
-  // SQL jadvalingizdagi nomlar bilan bir xil bo'lishi shart!
+  // 1. MA'LUMOTLARNI TOZALASH (Sanitizing)
+  // Agar Androiddan biror narsa kelmay qolsa, server qulamasligi kerak!
+  const safeData = {
+    fromLocation: data.fromLocation || "Noma'lum joy",
+    toLocation: data.toLocation || "Noma'lum joy",
+    date: data.date || new Date().toISOString().split('T')[0],
+    time: data.time || "00:00",
+    price: data.price ? data.price.toString() : "0",
+    seats: data.seats || 1,
+    driverId: data.driverId,
 
-  const dbPayload = {
-    driver_id: driverId,           // Bazada: driver_id
-    from_city: fromLocation,       // Bazada: from_city
-    to_city: toLocation,           // Bazada: to_city
-
-    // Sana va vaqtni birlashtiramiz (Postgres TIMESTAMP uchun)
-    departure_time: `${date}T${time}:00`,
-
-    price: price.toString(),       // Bazada price TEXT bo'lishi mumkin
-    available_seats: seats,        // Bazada: available_seats
-
-    // Qo'shimcha majburiy maydonlar (bo'sh qolmasligi uchun)
-    driver_name: "Test Haydovchi",
-    car_model: "Chevrolet Gentra",
-    phone_number: "+998901234567",
-
-    // Koordinatalar (Ikkita formatda yozamiz, qaysi biri borligiga qarab)
-    start_lat: fromLat,
-    start_lng: fromLng,
-    end_lat: toLat,
-    end_lng: toLng,
-    // Agar eski camelCase ustunlar qolib ketgan bo'lsa:
-    startLat: fromLat,
-    startLng: fromLng,
-    endLat: toLat,
-    endLng: toLng
+    // Koordinatalar: Agar kelmasa 0.0 deb olamiz (Crash oldini oladi)
+    fromLat: parseFloat(data.fromLat) || 0.0,
+    fromLng: parseFloat(data.fromLng) || 0.0,
+    toLat: parseFloat(data.toLat) || 0.0,
+    toLng: parseFloat(data.toLng) || 0.0
   };
 
-  console.log("🛠 Supabasega yuborilayotgan ma'lumot:", dbPayload);
+  // 2. BAZAGA MOSLASH
+  // Supabase (PostgreSQL) odatda snake_case (pastki_chiziq) ishlatadi.
+  const dbPayload = {
+    driver_id: safeData.driverId,
+    from_city: safeData.fromLocation,
+    to_city: safeData.toLocation,
+    departure_time: `${safeData.date}T${safeData.time}:00`,
+    price: safeData.price,
+    available_seats: safeData.seats,
 
-  // 3. Insert
+    // Majburiy maydonlarni to'ldiramiz
+    driver_name: "Test Haydovchi",
+    car_model: "Chevrolet",
+    phone_number: "+998900000000",
+    status: "active",
+
+    // Faqat snake_case variantini qoldiramiz (eng ishonchlisi)
+    start_lat: safeData.fromLat,
+    start_lng: safeData.fromLng,
+    end_lat: safeData.toLat,
+    end_lng: safeData.toLng
+  };
+
+  console.log("📡 Supabasega yuborilayotgan toza paket:", dbPayload);
+
+  // 3. INSERT
   const { data: newTrip, error } = await supabase
-    .from('trips')
+    .from('trips') // Jadval nomi aniq 'trips' bo'lishi kerak
     .insert([dbPayload])
     .select()
     .single();
 
   if (error) {
-    console.error("❌ Supabase Xatosi:", error.message);
-    console.error("Batafsil:", error);
+    // Agar xato bo'lsa, uni terminalga aniq chiqarib beramiz
+    console.error("❌ BAZA XATOSI:", error.message);
+    console.error("Hamma detallar:", error);
     throw new Error(error.message);
   }
 
