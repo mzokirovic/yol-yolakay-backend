@@ -75,3 +75,54 @@ exports.getMyTrips = async (req, res) => {
     return res.status(500).json({ success: false, error: { message: error.message } });
   }
 };
+
+
+exports.getTripDetails = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const data = await tripService.getTripDetails(id);
+
+    return res.status(200).json({
+      success: true,
+      trip: data.trip,
+      seats: data.seats
+    });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: { message: e.message } });
+  }
+};
+
+exports.bookSeat = async (req, res) => {
+  try {
+    const { id, seatNo } = req.params;
+    const seat = parseInt(seatNo, 10);
+
+    if (Number.isNaN(seat) || seat < 1 || seat > 4) {
+      return res.status(400).json({ success: false, error: { message: 'seatNo 1..4 bo‘lishi kerak' } });
+    }
+
+    const { clientId, holderName } = req.body || {};
+    if (!clientId) {
+      return res.status(400).json({ success: false, error: { message: 'clientId required' } });
+    }
+
+    const data = await tripService.bookSeat({
+      tripId: id,
+      seatNo: seat,
+      clientId,
+      holderName
+    });
+
+    return res.status(200).json({
+      success: true,
+      trip: data.trip,
+      seats: data.seats
+    });
+  } catch (e) {
+    // seat available emas bo'lsa 409 qaytaramiz
+    if (e.code === 'SEAT_NOT_AVAILABLE') {
+      return res.status(409).json({ success: false, error: { message: e.message } });
+    }
+    return res.status(500).json({ success: false, error: { message: e.message } });
+  }
+};

@@ -6,6 +6,7 @@ function nextDateISO(dateStr /* YYYY-MM-DD */) {
   return d.toISOString().slice(0, 10);
 }
 
+// ---------- TRIPS ----------
 exports.insertTrip = async (dbPayload) => {
   return await supabase
     .from('trips')
@@ -47,4 +48,73 @@ exports.getMyTrips = async ({ driverName }) => {
   if (driverName) query = query.eq('driver_name', driverName);
 
   return await query;
+};
+
+exports.getTripById = async (tripId) => {
+  return await supabase
+    .from('trips')
+    .select('*')
+    .eq('id', tripId)
+    .single();
+};
+
+// ---------- SEATS ----------
+exports.getTripSeats = async (tripId) => {
+  return await supabase
+    .from('trip_seats')
+    .select('*')
+    .eq('trip_id', tripId)
+    .order('seat_no', { ascending: true });
+};
+
+// Trip yaratilganda 1..4 seat qatorlarini create qiladi.
+// seatsOffered = trips.available_seats (1..4)
+exports.initTripSeats = async (tripId, seatsOffered) => {
+  const rows = [1, 2, 3, 4].map((n) => ({
+    trip_id: tripId,
+    seat_no: n,
+    status: n <= seatsOffered ? 'available' : 'blocked',
+  }));
+
+  // unique constraint bor, agar takror insert bo‘lsa error beradi (normal)
+  return await supabase
+    .from('trip_seats')
+    .insert(rows);
+};
+
+// Seatni "available" bo'lsa "booked" qiladi.
+// ✅ maybeSingle() bilan: agar 0 row bo‘lsa error emas, data=null bo‘ladi
+exports.bookSeat = async ({ tripId, seatNo, holderName, clientId }) => {
+  return await supabase
+    .from('trip_seats')
+    .update({
+      status: 'booked',
+      holder_name: holderName ?? 'Passenger',
+      holder_client_id: clientId,
+    })
+    .eq('trip_id', tripId)
+    .eq('seat_no', seatNo)
+    .eq('status', 'available')
+    .select()
+    .maybeSingle();
+};
+
+// trips.available_seats ni -1 qilish (MVP)
+exports.decrementTripAvailableSeats = async (tripId) => {
+  const { data: trip, error: e1 } = await supabase
+    .from('trips')
+    .select('available_seats')
+    .eq('id', tripId)
+    .single();
+
+  if (e1) return { data: null, error: e1 };
+
+  const next = Math.max(0, (trip.available_seats ?? 0) - 1);
+
+  return await supabase
+    .from('trips')
+    .update({ available_seats: next })
+    .eq('id', tripId)
+    .select('available_seats')
+    .single();
 };
