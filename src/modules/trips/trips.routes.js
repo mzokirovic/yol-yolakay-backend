@@ -8,5 +8,7 @@ router.get('/my', controller.getMyTrips);
 
 router.get('/:id', controller.getTripDetails);
 router.post('/:id/seats/:seatNo/book', controller.bookSeat);
+router.post('/:id/seats/:seatNo/block', controller.blockSeat);
+router.post('/:id/seats/:seatNo/unblock', controller.unblockSeat);
 
 module.exports = router;

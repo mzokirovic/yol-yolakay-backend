@@ -107,3 +107,36 @@ exports.bookSeat = async ({ tripId, seatNo, clientId, holderName }) => {
   // Return refreshed details
   return await exports.getTripDetails(tripId);
 };
+
+
+exports.blockSeat = async ({ tripId, seatNo }) => {
+  const { data: updated, error } = await repo.blockSeatByDriver({ tripId, seatNo });
+  if (error) throw error;
+
+  if (!updated) {
+    const err = new Error("Seat block qilib bo‘lmadi (band qilingan yoki allaqachon blocked)");
+    err.code = "SEAT_NOT_AVAILABLE";
+    throw err;
+  }
+
+  // available_seats - 1
+  const { error: e2 } = await repo.decrementTripAvailableSeats(tripId);
+  if (e2) throw e2;
+
+  return await exports.getTripDetails(tripId);
+};
+
+exports.unblockSeat = async ({ tripId, seatNo }) => {
+  const { data: updated, error } = await repo.unblockSeatByDriver({ tripId, seatNo });
+  if (error) throw error;
+
+  if (!updated) {
+    throw new Error("Seat unblock qilib bo‘lmadi (bu seat driver block qilmagan yoki boshqa holat)");
+  }
+
+  // available_seats + 1
+  const { error: e2 } = await repo.incrementTripAvailableSeats(tripId);
+  if (e2) throw e2;
+
+  return await exports.getTripDetails(tripId);
+};

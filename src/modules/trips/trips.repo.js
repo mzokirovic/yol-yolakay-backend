@@ -118,3 +118,44 @@ exports.decrementTripAvailableSeats = async (tripId) => {
     .select('available_seats')
     .single();
 };
+
+exports.blockSeatByDriver = async ({ tripId, seatNo }) => {
+  return await supabase
+    .from('trip_seats')
+    .update({ status: 'blocked', locked_by_driver: true })
+    .eq('trip_id', tripId)
+    .eq('seat_no', seatNo)
+    .eq('status', 'available')
+    .select()
+    .maybeSingle();
+};
+
+exports.unblockSeatByDriver = async ({ tripId, seatNo }) => {
+  return await supabase
+    .from('trip_seats')
+    .update({ status: 'available', locked_by_driver: false })
+    .eq('trip_id', tripId)
+    .eq('seat_no', seatNo)
+    .eq('status', 'blocked')
+    .eq('locked_by_driver', true)
+    .select()
+    .maybeSingle();
+};
+
+exports.incrementTripAvailableSeats = async (tripId) => {
+  const { data: trip, error: e1 } = await supabase
+    .from('trips')
+    .select('available_seats')
+    .eq('id', tripId)
+    .single();
+  if (e1) return { data: null, error: e1 };
+
+  const next = Math.min(4, (trip.available_seats ?? 0) + 1);
+
+  return await supabase
+    .from('trips')
+    .update({ available_seats: next })
+    .eq('id', tripId)
+    .select('available_seats')
+    .single();
+};
