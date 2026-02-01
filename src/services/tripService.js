@@ -1,66 +1,62 @@
 const supabase = require('../config/supabase');
 
 exports.createTrip = async (data) => {
-  // 1. Androiddan kelgan ma'lumotlar
+  // 1. Androiddan kelayotgan JSON
   const {
-    fromLocation,
-    toLocation,
-    date,
-    time,
+    fromLocation, // Android: "Toshkent"
+    toLocation,   // Android: "Samarqand"
+    date,         // Android: "2026-02-02"
+    time,         // Android: "10:30"
     price,
     seats,
-    driverId,
-    // Koordinatalar
+    driverId,     // Android: "uuid-code..."
     fromLat, fromLng,
     toLat, toLng
   } = data;
 
-  // 2. Sanani va Vaqtni birlashtiramiz (Bazadagi 'departure_time' uchun)
-  // Masalan: "2026-02-02 09:30:00"
-  const fullDepartureTime = `${date}T${time}:00`;
+  // 2. Bazaga moslash (Mapping)
+  // SQL jadvalingizdagi nomlar bilan bir xil bo'lishi shart!
 
-  // 3. Supabasega yozish (Sizning SQL strukturangiz bo'yicha)
+  const dbPayload = {
+    driver_id: driverId,           // Bazada: driver_id
+    from_city: fromLocation,       // Bazada: from_city
+    to_city: toLocation,           // Bazada: to_city
+
+    // Sana va vaqtni birlashtiramiz (Postgres TIMESTAMP uchun)
+    departure_time: `${date}T${time}:00`,
+
+    price: price.toString(),       // Bazada price TEXT bo'lishi mumkin
+    available_seats: seats,        // Bazada: available_seats
+
+    // Qo'shimcha majburiy maydonlar (bo'sh qolmasligi uchun)
+    driver_name: "Test Haydovchi",
+    car_model: "Chevrolet Gentra",
+    phone_number: "+998901234567",
+
+    // Koordinatalar (Ikkita formatda yozamiz, qaysi biri borligiga qarab)
+    start_lat: fromLat,
+    start_lng: fromLng,
+    end_lat: toLat,
+    end_lng: toLng,
+    // Agar eski camelCase ustunlar qolib ketgan bo'lsa:
+    startLat: fromLat,
+    startLng: fromLng,
+    endLat: toLat,
+    endLng: toLng
+  };
+
+  console.log("🛠 Supabasega yuborilayotgan ma'lumot:", dbPayload);
+
+  // 3. Insert
   const { data: newTrip, error } = await supabase
-    .from('trips') // Jadval nomi
-    .insert([
-      {
-        // --- ASOSIY USTUNLAR (Sizning SQL bo'yicha) ---
-        driver_id: driverId,
-
-        from_city: fromLocation,  // Node.js dagi 'fromLocation' -> Bazadagi 'from_city' ga tushadi
-        to_city: toLocation,      // 'toLocation' -> 'to_city' ga
-
-        departure_time: fullDepartureTime, // Yig'ilgan vaqt
-
-        price: price.toString(), // Bazada narx matn (string) ko'rinishida ekan
-        available_seats: seats,  // 'seats' -> 'available_seats' ga
-
-        // --- MAJBURIY BO'LISHI MUMKIN BO'LGAN USTUNLAR ---
-        // Android hozircha bularni jo'natmayapti, shuning uchun "fake" ma'lumot tiqib turamiz.
-        // Keyinchalik bularni ham Androiddan olamiz.
-        driver_name: "Test Haydovchi",
-        car_model: "Chevrolet Gentra",
-        phone_number: "+998901234567",
-
-        // --- KOORDINATALAR ---
-        // Sizning SQL da ham 'startLat', ham 'start_lat' bor ekan.
-        // Ikkalasiga ham yozib qo'yaveramiz (ehtiyot shart)
-        start_lat: fromLat,
-        start_lng: fromLng,
-        end_lat: toLat,
-        end_lng: toLng,
-
-        startLat: fromLat,
-        startLng: fromLng,
-        endLat: toLat,
-        endLng: toLng
-      }
-    ])
+    .from('trips')
+    .insert([dbPayload])
     .select()
     .single();
 
   if (error) {
-    console.error("Supabase Error:", error); // Xatoni konsolga chiqarish
+    console.error("❌ Supabase Xatosi:", error.message);
+    console.error("Batafsil:", error);
     throw new Error(error.message);
   }
 
