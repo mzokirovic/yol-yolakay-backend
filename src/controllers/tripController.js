@@ -61,6 +61,29 @@ exports.publishTrip = async (req, res) => {
 };
 
 
+
+exports.getMyTrips = async (req, res) => {
+  try {
+    const { driverName } = req.query;
+
+    let query = supabase
+      .from('trips')
+      .select('*')
+      .order('departure_time', { ascending: false });
+
+    if (driverName) query = query.eq('driver_name', driverName);
+
+    const { data, error } = await query;
+    if (error) throw error;
+
+    res.status(200).json({ success: true, count: data.length, data });
+  } catch (error) {
+    res.status(500).json({ success: false, error: { message: error.message } });
+  }
+};
+
+
+
 // 2) Safarlarni qidirish (GET)
 exports.searchTrips = async (req, res) => {
   try {
