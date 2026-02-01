@@ -8,8 +8,19 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// ---------------------------------------------------------
+// 👇 YANGI QO'SHILADIGAN LOG QISMI (KAMERA) 👇
+// Bu har bir kelgan so'rovni ko'rsatadi.
+app.use((req, res, next) => {
+    console.log(`[REQUEST KELDI] Method: ${req.method} | URL: ${req.originalUrl}`);
+    next();
+});
+// ---------------------------------------------------------
+
 // Marshrutlarni ulash
 const tripRoutes = require('./src/routes/tripRoutes');
+// Eslatma: Bu yerda /api/trips deb yozilgan.
+// Demak to'liq manzil: /api/trips/publish bo'ladi.
 app.use('/api/trips', tripRoutes);
 
 // Bosh sahifa (Render ishlashini tekshirish uchun)
