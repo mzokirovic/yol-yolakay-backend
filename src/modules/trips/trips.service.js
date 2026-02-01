@@ -1,8 +1,6 @@
-const supabase = require('../config/supabase');
+const repo = require('./trips.repo');
 
 exports.createTrip = async (data) => {
-  console.log("🛠 Servisga kelgan xom ma'lumot:", data);
-
   // 1) Sanitizing + normalizatsiya
   const fromLocation = data.fromLocation || "Noma'lum joy";
   const toLocation = data.toLocation || "Noma'lum joy";
@@ -10,13 +8,11 @@ exports.createTrip = async (data) => {
   const date = data.date || new Date().toISOString().split('T')[0]; // YYYY-MM-DD
   const time = data.time || "00:00"; // HH:mm
 
-  // ✅ price: number bo‘lishi kerak
+  // price: number
   const priceNum = Number(data.price);
-  if (Number.isNaN(priceNum)) {
-    throw new Error("Price noto'g'ri formatda");
-  }
+  if (Number.isNaN(priceNum)) throw new Error("Price noto'g'ri formatda");
 
-  // ✅ seats: 1..4
+  // seats: 1..4
   const seatsNum = parseInt(data.seats, 10);
   if (Number.isNaN(seatsNum) || seatsNum < 1 || seatsNum > 4) {
     throw new Error("Seats 1..4 oralig'ida bo'lishi kerak");
@@ -37,10 +33,10 @@ exports.createTrip = async (data) => {
     toLng: Number.isFinite(toLng) ? toLng : 0.0,
   };
 
-  // ✅ departure_time: timezone bilan (Uzbekistan +05:00)
+  // departure_time (Uzbekistan +05:00)
   const departureTime = `${date}T${time}:00+05:00`;
 
-  // 2) DB payload (snake_case)
+  // 2) DB payload
   const dbPayload = {
     driver_id: driverId,
     from_city: fromLocation,
@@ -49,7 +45,7 @@ exports.createTrip = async (data) => {
     price: priceNum,
     available_seats: seatsNum,
 
-    // Majburiy maydonlar (hozircha test)
+    // MVP: test data
     driver_name: "Test Haydovchi",
     car_model: "Chevrolet",
     phone_number: "+998900000000",
@@ -61,20 +57,19 @@ exports.createTrip = async (data) => {
     end_lng: safeCoords.toLng
   };
 
-  console.log("📡 Supabasega yuborilayotgan paket:", dbPayload);
-
-  // 3) INSERT
-  const { data: newTrip, error } = await supabase
-    .from('trips')
-    .insert([dbPayload])
-    .select()
-    .single();
-
-  if (error) {
-    console.error("❌ BAZA XATOSI:", error.message);
-    console.error("Hamma detallar:", error);
-    throw new Error(error.message);
-  }
-
+  const { data: newTrip, error } = await repo.insertTrip(dbPayload);
+  if (error) throw error;
   return newTrip;
+};
+
+exports.searchTrips = async ({ from, to, date, passengers }) => {
+  const { data, error } = await repo.searchTrips({ from, to, date, passengers });
+  if (error) throw error;
+  return data;
+};
+
+exports.getMyTrips = async ({ driverName }) => {
+  const { data, error } = await repo.getMyTrips({ driverName });
+  if (error) throw error;
+  return data;
 };
