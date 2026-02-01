@@ -1,28 +1,18 @@
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 
-// O'zgaruvchilarni olamiz
+// 1. O'zgaruvchilarni olamiz
 const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_KEY;
 
-// --- 🕵️‍♂️ DETEKTIV LOGLAR ---
-console.log("==========================================");
-console.log("🔍 DIAGNOSTIKA:");
-// Agar 'undefined' bo'lsa "YO'Q" deydi, agar bo'lsa uzunligini aytadi
-console.log(`1. SUPABASE_URL: ${supabaseUrl ? "✅ BOR" : "❌ YO'Q"} (Uzunligi: ${supabaseUrl ? supabaseUrl.length : 0})`);
-console.log(`2. SUPABASE_KEY: ${supabaseKey ? "✅ BOR" : "❌ YO'Q"} (Uzunligi: ${supabaseKey ? supabaseKey.length : 0})`);
-console.log("==========================================");
+// Aqlli tanlov: Renderdagi ANON keyni ham, oddiy KEYni ham qabul qiladi
+const supabaseKey = process.env.SUPABASE_KEY || process.env.SUPABASE_ANON_KEY;
 
-// --- 🛡 XAVFSIZLIK CHORASI ---
-// Agar kalitlar yo'q bo'lsa, server qulamasligi uchun SOXTA qiymat beramiz.
-// Bu faqat loglarni ko'rib olishimiz uchun kerak.
-const finalUrl = supabaseUrl || "https://example.supabase.co";
-const finalKey = supabaseKey || "soxta-kalit-faqat-test-uchun";
-
+// 2. Agar kalitlar yo'q bo'lsa - Server ishlamasin (Xavfsizlik)
 if (!supabaseUrl || !supabaseKey) {
-    console.error("⚠️ DIQQAT: Render Environmentda kalitlar topilmadi! Soxta kalitlar ishlatilyapti.");
+    throw new Error('❌ Supabase URL yoki API Key topilmadi! .env faylni yoki Render Environmentni tekshiring.');
 }
 
-const supabase = createClient(finalUrl, finalKey);
+// 3. Ulanish
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 module.exports = supabase;
