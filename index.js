@@ -1,3 +1,5 @@
+console.log("✅ BOOT FILE:", __filename);
+
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -22,6 +24,10 @@ app.use('/api/trips', tripRoutes);
 // ✅ Profile routes
 const profileRoutes = require('./src/modules/profile/profile.routes');
 app.use('/api/profile', profileRoutes);
+
+
+const inboxRoutes = require('./src/modules/inbox/inbox.routes');
+app.use('/api/inbox', inboxRoutes);
 
 
 // Bosh sahifa (Render ishlashini tekshirish uchun)

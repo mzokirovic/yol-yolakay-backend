@@ -1,3 +1,5 @@
+router.get('/ping', (req, res) => res.json({ ok: true, route: "inbox" }));
+
 const express = require('express');
 const router = express.Router();
 const controller = require('./inbox.controller');
