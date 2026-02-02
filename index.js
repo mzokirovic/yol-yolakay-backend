@@ -18,6 +18,12 @@ app.use((req, res, next) => {
 const tripRoutes = require('./src/modules/trips/trips.routes');
 app.use('/api/trips', tripRoutes);
 
+
+// ✅ Profile routes
+const profileRoutes = require('./src/modules/profile/profile.routes');
+app.use('/api/profile', profileRoutes);
+
+
 // Bosh sahifa (Render ishlashini tekshirish uchun)
 app.get('/', (req, res) => {
   res.json({ message: "Yo'l-Yo'lakay Backend is live!", status: "OK" });
