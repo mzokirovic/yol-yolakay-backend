@@ -6,6 +6,15 @@ function nextDateISO(dateStr /* YYYY-MM-DD */) {
   return d.toISOString().slice(0, 10);
 }
 
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 // ---------- TRIPS ----------
 exports.insertTrip = async (dbPayload) => {
   return await supabase
@@ -25,11 +34,9 @@ exports.searchTrips = async ({ from, to, date, passengers }) => {
   if (from) query = query.ilike('from_city', `%${from}%`);
   if (to) query = query.ilike('to_city', `%${to}%`);
 
-  // passengers: available_seats >= passengers
   const p = passengers != null ? parseInt(passengers, 10) : null;
   if (p && !Number.isNaN(p)) query = query.gte('available_seats', p);
 
-  // date: faqat o‘sha kun oralig‘i (>= start, < next day)
   if (date) {
     const start = `${date}T00:00:00+05:00`;
     const end = `${nextDateISO(date)}T00:00:00+05:00`;
@@ -46,7 +53,6 @@ exports.getMyTrips = async ({ driverName }) => {
     .order('departure_time', { ascending: false });
 
   if (driverName) query = query.eq('driver_name', driverName);
-
   return await query;
 };
 
@@ -55,6 +61,15 @@ exports.getTripById = async (tripId) => {
     .from('trips')
     .select('*')
     .eq('id', tripId)
+    .single();
+};
+
+exports.updateTripAvailableSeats = async (tripId, availableSeats) => {
+  return await supabase
+    .from('trips')
+    .update({ available_seats: availableSeats })
+    .eq('id', tripId)
+    .select('available_seats')
     .single();
 };
 
@@ -67,28 +82,62 @@ exports.getTripSeats = async (tripId) => {
     .order('seat_no', { ascending: true });
 };
 
-// Trip yaratilganda 1..4 seat qatorlarini create qiladi.
-// seatsOffered = trips.available_seats (1..4)
+// ✅ Trip yaratilganda: 4 ta seat bo‘ladi,
+// seatsOffered ta seat RANDOM available, qolganlari blocked (system-closed: locked_by_driver=false)
 exports.initTripSeats = async (tripId, seatsOffered) => {
-  const rows = [1, 2, 3, 4].map((n) => ({
+  const all = [1, 2, 3, 4];
+  const open = new Set(shuffle(all).slice(0, seatsOffered));
+
+  const rows = all.map((n) => ({
     trip_id: tripId,
     seat_no: n,
-    status: n <= seatsOffered ? 'available' : 'blocked',
+    status: open.has(n) ? 'available' : 'blocked',
+    locked_by_driver: false, // system-closed
+    holder_name: null,
+    holder_client_id: null,
   }));
 
-  // unique constraint bor, agar takror insert bo‘lsa error beradi (normal)
-  return await supabase
-    .from('trip_seats')
-    .insert(rows);
+  return await supabase.from('trip_seats').insert(rows);
 };
 
-// Seatni "available" bo'lsa "booked" qiladi.
-// ✅ maybeSingle() bilan: agar 0 row bo‘lsa error emas, data=null bo‘ladi
-exports.bookSeat = async ({ tripId, seatNo, holderName, clientId }) => {
+// ✅ available seatlar sonini seat table’dan hisoblaymiz
+exports.recalcTripAvailableSeats = async (tripId) => {
+  const { data, error } = await supabase
+    .from('trip_seats')
+    .select('id', { count: 'exact', head: true })
+    .eq('trip_id', tripId)
+    .eq('status', 'available');
+
+  if (error) return { data: null, error };
+  const count = data?.length ? data.length : 0; // head:true bo‘lsa length 0 bo‘lishi mumkin
+
+  // Supabase head:true bilan count alohida qaytadi, lekin clientlarda farq bo‘lishi mumkin.
+  // Shuning uchun count’ni xavfsiz olish:
+  const availableSeats = (typeof data === 'object' && data !== null && 'count' in data)
+    ? data.count
+    : undefined;
+
+  // Agar count kelmasa, fallback: yana bir marta oddiy select qilib sanaymiz
+  if (availableSeats == null) {
+    const r = await supabase
+      .from('trip_seats')
+      .select('id')
+      .eq('trip_id', tripId)
+      .eq('status', 'available');
+    if (r.error) return { data: null, error: r.error };
+    const c = (r.data || []).length;
+    return await exports.updateTripAvailableSeats(tripId, c);
+  }
+
+  return await exports.updateTripAvailableSeats(tripId, availableSeats);
+};
+
+// Passenger: available -> pending (atomik)
+exports.requestSeat = async ({ tripId, seatNo, holderName, clientId }) => {
   return await supabase
     .from('trip_seats')
     .update({
-      status: 'booked',
+      status: 'pending',
       holder_name: holderName ?? 'Passenger',
       holder_client_id: clientId,
     })
@@ -99,26 +148,52 @@ exports.bookSeat = async ({ tripId, seatNo, holderName, clientId }) => {
     .maybeSingle();
 };
 
-// trips.available_seats ni -1 qilish (MVP)
-exports.decrementTripAvailableSeats = async (tripId) => {
-  const { data: trip, error: e1 } = await supabase
-    .from('trips')
-    .select('available_seats')
-    .eq('id', tripId)
-    .single();
-
-  if (e1) return { data: null, error: e1 };
-
-  const next = Math.max(0, (trip.available_seats ?? 0) - 1);
-
+// Driver: pending -> booked (atomik)
+exports.approveSeat = async ({ tripId, seatNo }) => {
   return await supabase
-    .from('trips')
-    .update({ available_seats: next })
-    .eq('id', tripId)
-    .select('available_seats')
-    .single();
+    .from('trip_seats')
+    .update({ status: 'booked' })
+    .eq('trip_id', tripId)
+    .eq('seat_no', seatNo)
+    .eq('status', 'pending')
+    .select()
+    .maybeSingle();
 };
 
+// Driver: pending -> available (atomik) + holder null
+exports.rejectSeat = async ({ tripId, seatNo }) => {
+  return await supabase
+    .from('trip_seats')
+    .update({
+      status: 'available',
+      holder_name: null,
+      holder_client_id: null,
+    })
+    .eq('trip_id', tripId)
+    .eq('seat_no', seatNo)
+    .eq('status', 'pending')
+    .select()
+    .maybeSingle();
+};
+
+// Passenger: pending(mine) -> available (atomik)
+exports.cancelRequest = async ({ tripId, seatNo, clientId }) => {
+  return await supabase
+    .from('trip_seats')
+    .update({
+      status: 'available',
+      holder_name: null,
+      holder_client_id: null,
+    })
+    .eq('trip_id', tripId)
+    .eq('seat_no', seatNo)
+    .eq('status', 'pending')
+    .eq('holder_client_id', clientId)
+    .select()
+    .maybeSingle();
+};
+
+// Driver: available -> blocked (atomik, locked_by_driver=true)
 exports.blockSeatByDriver = async ({ tripId, seatNo }) => {
   return await supabase
     .from('trip_seats')
@@ -130,6 +205,7 @@ exports.blockSeatByDriver = async ({ tripId, seatNo }) => {
     .maybeSingle();
 };
 
+// Driver: blocked(driver) -> available
 exports.unblockSeatByDriver = async ({ tripId, seatNo }) => {
   return await supabase
     .from('trip_seats')
@@ -140,22 +216,4 @@ exports.unblockSeatByDriver = async ({ tripId, seatNo }) => {
     .eq('locked_by_driver', true)
     .select()
     .maybeSingle();
-};
-
-exports.incrementTripAvailableSeats = async (tripId) => {
-  const { data: trip, error: e1 } = await supabase
-    .from('trips')
-    .select('available_seats')
-    .eq('id', tripId)
-    .single();
-  if (e1) return { data: null, error: e1 };
-
-  const next = Math.min(4, (trip.available_seats ?? 0) + 1);
-
-  return await supabase
-    .from('trips')
-    .update({ available_seats: next })
-    .eq('id', tripId)
-    .select('available_seats')
-    .single();
 };

@@ -1,10 +1,29 @@
 const tripService = require('./trips.service');
 
+function getUserId(req) {
+  const userId = req.headers['x-user-id'] || req.query.userId;
+  if (!userId) {
+    const err = new Error("x-user-id yuborilmadi (yoki ?userId=...)");
+    err.status = 400;
+    throw err;
+  }
+  return String(userId);
+}
+
+function parseSeatNo(seatNo) {
+  const seat = parseInt(seatNo, 10);
+  if (Number.isNaN(seat) || seat < 1 || seat > 4) {
+    const err = new Error('seatNo 1..4 bo‘lishi kerak');
+    err.status = 400;
+    throw err;
+  }
+  return seat;
+}
+
 exports.publishTrip = async (req, res) => {
   try {
     const b = req.body || {};
 
-    // ✅ camelCase + snake_case compatibility
     const tripData = {
       fromLocation: b.fromLocation ?? b.from_city,
       toLocation: b.toLocation ?? b.to_city,
@@ -46,14 +65,9 @@ exports.publishTrip = async (req, res) => {
 exports.searchTrips = async (req, res) => {
   try {
     const { from, to, date, passengers } = req.query;
-
     const list = await tripService.searchTrips({ from, to, date, passengers });
 
-    return res.status(200).json({
-      success: true,
-      count: list.length,
-      data: list
-    });
+    return res.status(200).json({ success: true, count: list.length, data: list });
   } catch (error) {
     console.error("❌ Qidiruv xatosi:", error.message);
     return res.status(500).json({ success: false, error: { message: error.message } });
@@ -63,64 +77,92 @@ exports.searchTrips = async (req, res) => {
 exports.getMyTrips = async (req, res) => {
   try {
     const { driverName } = req.query;
-
     const list = await tripService.getMyTrips({ driverName });
 
-    return res.status(200).json({
-      success: true,
-      count: list.length,
-      data: list
-    });
+    return res.status(200).json({ success: true, count: list.length, data: list });
   } catch (error) {
     return res.status(500).json({ success: false, error: { message: error.message } });
   }
 };
-
 
 exports.getTripDetails = async (req, res) => {
   try {
     const { id } = req.params;
     const data = await tripService.getTripDetails(id);
 
-    return res.status(200).json({
-      success: true,
-      trip: data.trip,
-      seats: data.seats
-    });
+    return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
     return res.status(500).json({ success: false, error: { message: e.message } });
   }
 };
 
+// ----------------- Driver: block/unblock -----------------
 
 exports.blockSeat = async (req, res) => {
   try {
+    const userId = getUserId(req);
     const { id, seatNo } = req.params;
-    const seat = parseInt(seatNo, 10);
-    if (Number.isNaN(seat) || seat < 1 || seat > 4) {
-      return res.status(400).json({ success: false, error: { message: 'seatNo 1..4 bo‘lishi kerak' } });
-    }
+    const seat = parseSeatNo(seatNo);
 
-    const data = await tripService.blockSeat({ tripId: id, seatNo: seat });
-
+    const data = await tripService.blockSeat({ tripId: id, seatNo: seat, driverId: userId });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    if (e.code === 'SEAT_NOT_AVAILABLE') {
-      return res.status(409).json({ success: false, error: { message: e.message } });
-    }
+    if (e.code === 'FORBIDDEN') return res.status(403).json({ success: false, error: { message: e.message } });
+    if (e.code === 'SEAT_NOT_AVAILABLE') return res.status(409).json({ success: false, error: { message: e.message } });
     return res.status(500).json({ success: false, error: { message: e.message } });
   }
 };
 
 exports.unblockSeat = async (req, res) => {
   try {
+    const userId = getUserId(req);
     const { id, seatNo } = req.params;
-    const seat = parseInt(seatNo, 10);
-    if (Number.isNaN(seat) || seat < 1 || seat > 4) {
-      return res.status(400).json({ success: false, error: { message: 'seatNo 1..4 bo‘lishi kerak' } });
-    }
+    const seat = parseSeatNo(seatNo);
 
-    const data = await tripService.unblockSeat({ tripId: id, seatNo: seat });
+    const data = await tripService.unblockSeat({ tripId: id, seatNo: seat, driverId: userId });
+    return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
+  } catch (e) {
+    if (e.code === 'FORBIDDEN') return res.status(403).json({ success: false, error: { message: e.message } });
+    return res.status(500).json({ success: false, error: { message: e.message } });
+  }
+};
+
+// ----------------- MVP+: pending flow -----------------
+
+// Passenger: available -> pending
+exports.requestSeat = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id, seatNo } = req.params;
+    const seat = parseSeatNo(seatNo);
+    const { holderName } = req.body || {};
+
+    const data = await tripService.requestSeat({
+      tripId: id,
+      seatNo: seat,
+      clientId: userId,
+      holderName
+    });
+
+    return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
+  } catch (e) {
+    if (e.code === 'SEAT_NOT_AVAILABLE') return res.status(409).json({ success: false, error: { message: e.message } });
+    return res.status(500).json({ success: false, error: { message: e.message } });
+  }
+};
+
+// Passenger: pending(mine) -> available
+exports.cancelRequest = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id, seatNo } = req.params;
+    const seat = parseSeatNo(seatNo);
+
+    const data = await tripService.cancelRequest({
+      tripId: id,
+      seatNo: seat,
+      clientId: userId
+    });
 
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
@@ -128,40 +170,43 @@ exports.unblockSeat = async (req, res) => {
   }
 };
 
-
-exports.bookSeat = async (req, res) => {
+// Driver: pending -> booked
+exports.approveSeat = async (req, res) => {
   try {
+    const userId = getUserId(req);
     const { id, seatNo } = req.params;
-    const seat = parseInt(seatNo, 10);
+    const seat = parseSeatNo(seatNo);
 
-    if (Number.isNaN(seat) || seat < 1 || seat > 4) {
-      return res.status(400).json({ success: false, error: { message: 'seatNo 1..4 bo‘lishi kerak' } });
-    }
-
-    const { clientId, holderName } = req.body || {};
-    if (!clientId) {
-      return res.status(400).json({ success: false, error: { message: 'clientId required' } });
-    }
-
-    const data = await tripService.bookSeat({
+    const data = await tripService.approveSeat({
       tripId: id,
       seatNo: seat,
-      clientId,
-      holderName
+      driverId: userId
     });
 
-    return res.status(200).json({
-      success: true,
-      trip: data.trip,
-      seats: data.seats
-    });
+    return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    // seat available emas bo'lsa 409 qaytaramiz
-    if (e.code === 'SEAT_NOT_AVAILABLE') {
-      return res.status(409).json({ success: false, error: { message: e.message } });
-    }
+    if (e.code === 'FORBIDDEN') return res.status(403).json({ success: false, error: { message: e.message } });
+    if (e.code === 'SEAT_NOT_AVAILABLE') return res.status(409).json({ success: false, error: { message: e.message } });
     return res.status(500).json({ success: false, error: { message: e.message } });
   }
 };
 
+// Driver: pending -> available
+exports.rejectSeat = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id, seatNo } = req.params;
+    const seat = parseSeatNo(seatNo);
 
+    const data = await tripService.rejectSeat({
+      tripId: id,
+      seatNo: seat,
+      driverId: userId
+    });
+
+    return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
+  } catch (e) {
+    if (e.code === 'FORBIDDEN') return res.status(403).json({ success: false, error: { message: e.message } });
+    return res.status(500).json({ success: false, error: { message: e.message } });
+  }
+};

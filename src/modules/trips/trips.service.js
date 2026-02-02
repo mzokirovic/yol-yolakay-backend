@@ -1,11 +1,30 @@
 const repo = require('./trips.repo');
 
+async function assertDriver(tripId, driverId) {
+  const { data: trip, error } = await repo.getTripById(tripId);
+  if (error) throw error;
+
+  if (!trip.driver_id) {
+    const err = new Error("Trip driver_id yo‘q (MVP data). Driver action mumkin emas.");
+    err.code = "FORBIDDEN";
+    throw err;
+  }
+
+  if (String(trip.driver_id) !== String(driverId)) {
+    const err = new Error("Bu action faqat haydovchiga ruxsat.");
+    err.code = "FORBIDDEN";
+    throw err;
+  }
+
+  return trip;
+}
+
 exports.createTrip = async (data) => {
   const fromLocation = data.fromLocation || "Noma'lum joy";
   const toLocation = data.toLocation || "Noma'lum joy";
 
-  const date = data.date || new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-  const time = data.time || "00:00"; // HH:mm
+  const date = data.date || new Date().toISOString().split('T')[0];
+  const time = data.time || "00:00";
 
   const priceNum = Number(data.price);
   if (Number.isNaN(priceNum)) throw new Error("Price noto'g'ri formatda");
@@ -37,7 +56,7 @@ exports.createTrip = async (data) => {
     to_city: toLocation,
     departure_time: departureTime,
     price: priceNum,
-    available_seats: seatsNum,
+    available_seats: seatsNum, // keyin recalc ham qiladi
 
     driver_name: "Test Haydovchi",
     car_model: "Chevrolet",
@@ -53,8 +72,11 @@ exports.createTrip = async (data) => {
   const { data: newTrip, error } = await repo.insertTrip(dbPayload);
   if (error) throw error;
 
-  // ✅ MUHIM: seat rows yaratamiz (1..4)
   await repo.initTripSeats(newTrip.id, seatsNum);
+
+  // ✅ drift bo‘lmasin
+  const { error: e2 } = await repo.recalcTripAvailableSeats(newTrip.id);
+  if (e2) throw e2;
 
   return newTrip;
 };
@@ -71,7 +93,6 @@ exports.getMyTrips = async ({ driverName }) => {
   return data;
 };
 
-// ✅ Trip Details: trip + seats
 exports.getTripDetails = async (tripId) => {
   const { data: trip, error: e1 } = await repo.getTripById(tripId);
   if (e1) throw e1;
@@ -82,9 +103,10 @@ exports.getTripDetails = async (tripId) => {
   return { trip, seats };
 };
 
-// ✅ Seat book (V1)
-exports.bookSeat = async ({ tripId, seatNo, clientId, holderName }) => {
-  const { data: updated, error } = await repo.bookSeat({
+// -------------------- MVP+ pending flow --------------------
+
+exports.requestSeat = async ({ tripId, seatNo, clientId, holderName }) => {
+  const { data: updated, error } = await repo.requestSeat({
     tripId,
     seatNo,
     clientId,
@@ -92,50 +114,87 @@ exports.bookSeat = async ({ tripId, seatNo, clientId, holderName }) => {
   });
 
   if (error) throw error;
-
-  // ✅ 0 row bo‘lsa => available emas (already booked/blocked)
   if (!updated) {
-    const err = new Error("Seat available emas");
+    const err = new Error("Seat available emas (band/pending/blocked)");
     err.code = "SEAT_NOT_AVAILABLE";
     throw err;
   }
 
-  // MVP: available_seats - 1
-  const { error: e3 } = await repo.decrementTripAvailableSeats(tripId);
-  if (e3) throw e3;
-
-  // Return refreshed details
-  return await exports.getTripDetails(tripId);
-};
-
-
-exports.blockSeat = async ({ tripId, seatNo }) => {
-  const { data: updated, error } = await repo.blockSeatByDriver({ tripId, seatNo });
-  if (error) throw error;
-
-  if (!updated) {
-    const err = new Error("Seat block qilib bo‘lmadi (band qilingan yoki allaqachon blocked)");
-    err.code = "SEAT_NOT_AVAILABLE";
-    throw err;
-  }
-
-  // available_seats - 1
-  const { error: e2 } = await repo.decrementTripAvailableSeats(tripId);
+  const { error: e2 } = await repo.recalcTripAvailableSeats(tripId);
   if (e2) throw e2;
 
   return await exports.getTripDetails(tripId);
 };
 
-exports.unblockSeat = async ({ tripId, seatNo }) => {
-  const { data: updated, error } = await repo.unblockSeatByDriver({ tripId, seatNo });
+exports.cancelRequest = async ({ tripId, seatNo, clientId }) => {
+  const { error } = await repo.cancelRequest({ tripId, seatNo, clientId });
+  if (error) throw error;
+
+  const { error: e2 } = await repo.recalcTripAvailableSeats(tripId);
+  if (e2) throw e2;
+
+  return await exports.getTripDetails(tripId);
+};
+
+exports.approveSeat = async ({ tripId, seatNo, driverId }) => {
+  await assertDriver(tripId, driverId);
+
+  const { data: updated, error } = await repo.approveSeat({ tripId, seatNo });
   if (error) throw error;
 
   if (!updated) {
-    throw new Error("Seat unblock qilib bo‘lmadi (bu seat driver block qilmagan yoki boshqa holat)");
+    const err = new Error("Approve bo‘lmadi (seat pending emas yoki allaqachon o‘zgargan)");
+    err.code = "SEAT_NOT_AVAILABLE";
+    throw err;
   }
 
-  // available_seats + 1
-  const { error: e2 } = await repo.incrementTripAvailableSeats(tripId);
+  const { error: e2 } = await repo.recalcTripAvailableSeats(tripId);
+  if (e2) throw e2;
+
+  return await exports.getTripDetails(tripId);
+};
+
+exports.rejectSeat = async ({ tripId, seatNo, driverId }) => {
+  await assertDriver(tripId, driverId);
+
+  const { error } = await repo.rejectSeat({ tripId, seatNo });
+  if (error) throw error;
+
+  const { error: e2 } = await repo.recalcTripAvailableSeats(tripId);
+  if (e2) throw e2;
+
+  return await exports.getTripDetails(tripId);
+};
+
+// -------------------- Driver block/unblock --------------------
+
+exports.blockSeat = async ({ tripId, seatNo, driverId }) => {
+  await assertDriver(tripId, driverId);
+
+  const { data: updated, error } = await repo.blockSeatByDriver({ tripId, seatNo });
+  if (error) throw error;
+
+  if (!updated) {
+    const err = new Error("Seat block qilib bo‘lmadi (pending/booked/blocked)");
+    err.code = "SEAT_NOT_AVAILABLE";
+    throw err;
+  }
+
+  const { error: e2 } = await repo.recalcTripAvailableSeats(tripId);
+  if (e2) throw e2;
+
+  return await exports.getTripDetails(tripId);
+};
+
+exports.unblockSeat = async ({ tripId, seatNo, driverId }) => {
+  await assertDriver(tripId, driverId);
+
+  const { data: updated, error } = await repo.unblockSeatByDriver({ tripId, seatNo });
+  if (error) throw error;
+
+  if (!updated) throw new Error("Seat unblock qilib bo‘lmadi (driver block qilmagan yoki boshqa holat)");
+
+  const { error: e2 } = await repo.recalcTripAvailableSeats(tripId);
   if (e2) throw e2;
 
   return await exports.getTripDetails(tripId);
