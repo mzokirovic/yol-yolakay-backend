@@ -45,3 +45,6 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Senior Server running on port ${PORT}`);
 });
+
+const notificationsRoutes = require('./src/modules/notifications/notifications.routes');
+app.use('/api/notifications', notificationsRoutes);
