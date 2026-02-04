@@ -17,19 +17,16 @@ function initFcm() {
 async function sendToToken(token, payload) {
   initFcm();
 
-  // Firebase doc'ga ko'ra token + data/notification bilan yuboramiz :contentReference[oaicite:10]{index=10}
+  // ✅ DATA-ONLY: background/closed holatda ham Android Service ishlaydi
   return getMessaging().send({
     token,
-    notification: {
-      title: payload.title,
-      body: payload.body,
-    },
+    android: { priority: "high" },
     data: {
-      notification_id: payload.notification_id ?? "",
-      trip_id: payload.trip_id ?? "",
-      thread_id: payload.thread_id ?? "",
-      title: payload.title ?? "",
-      body: payload.body ?? "",
+      notification_id: String(payload.notification_id ?? ""),
+      trip_id: String(payload.trip_id ?? ""),
+      thread_id: String(payload.thread_id ?? ""),
+      title: String(payload.title ?? ""),
+      body: String(payload.body ?? ""),
     },
   });
 }
