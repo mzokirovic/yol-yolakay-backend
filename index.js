@@ -6,36 +6,32 @@ const cors = require('cors');
 
 const app = express();
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Har bir kelgan so'rovni log qiladi
 app.use((req, res, next) => {
   console.log(`[REQUEST KELDI] Method: ${req.method} | URL: ${req.originalUrl}`);
   next();
 });
 
-// ✅ Marshrutlarni ulash (endi modules’dan)
 const tripRoutes = require('./src/modules/trips/trips.routes');
 app.use('/api/trips', tripRoutes);
 
-
-// ✅ Profile routes
 const profileRoutes = require('./src/modules/profile/profile.routes');
 app.use('/api/profile', profileRoutes);
-
 
 const inboxRoutes = require('./src/modules/inbox/inbox.routes');
 app.use('/api/inbox', inboxRoutes);
 
+// ✅ Notifications routes ham shu yerda bo‘lishi kerak
+const notificationsRoutes = require('./src/modules/notifications/notifications.routes');
+app.use('/api/notifications', notificationsRoutes);
 
-// Bosh sahifa (Render ishlashini tekshirish uchun)
 app.get('/', (req, res) => {
   res.json({ message: "Yo'l-Yo'lakay Backend is live!", status: "OK" });
 });
 
-// Xatolar bilan ishlash (Global Error Handler)
+// ✅ Global Error Handler doim eng oxirida
 app.use((err, req, res, next) => {
   console.error("SERVER_ERROR:", err.stack);
   res.status(500).json({ error: "Server ichki xatosi yuz berdi" });
@@ -45,6 +41,3 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Senior Server running on port ${PORT}`);
 });
-
-const notificationsRoutes = require('./src/modules/notifications/notifications.routes');
-app.use('/api/notifications', notificationsRoutes);

@@ -21,4 +21,16 @@ async function markAllRead(req, res, next) {
   } catch (e) { next(e); }
 }
 
-module.exports = { list, markRead, markAllRead };
+async function registerToken(req, res, next) {
+  try {
+    const userId = req.header("x-user-id");
+    const { token, platform = "android" } = req.body || {};
+    if (!userId || !token) return res.status(400).json({ success:false, error:"userId/token required" });
+
+    await service.registerToken(userId, token, platform);
+    res.json({ success: true });
+  } catch (e) { next(e); }
+}
+
+
+module.exports = { list, markRead, markAllRead, registerToken };

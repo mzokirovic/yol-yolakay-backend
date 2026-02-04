@@ -45,3 +45,42 @@ module.exports = {
   markAllRead,
   requireUserId,
 };
+
+
+async function registerPushToken(req) {
+  const uid = requireUserId(req);
+  const { token, platform = 'android' } = req.body || {};
+  if (!token) {
+    const err = new Error('token is required');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const { error } = await repo.upsertDeviceToken(uid, token, platform);
+  if (error) throw error;
+
+  return true;
+}
+
+module.exports = {
+  list,
+  markRead,
+  markAllRead,
+  registerPushToken,
+  requireUserId,
+};
+
+
+async function registerToken(userId, token, platform = "android") {
+  const { error } = await repo.upsertDeviceToken(userId, token, platform);
+  if (error) throw error;
+  return true;
+}
+
+module.exports = {
+  list,
+  markRead,
+  markAllRead,
+  requireUserId,
+  registerToken,
+};

@@ -28,7 +28,6 @@ async function markAllRead(userId) {
 }
 
 async function createNotification(payload) {
-  // payload: { user_id, type, title, body, trip_id, thread_id, seat_no, meta }
   return supabase
     .from('notifications')
     .insert(payload)
@@ -36,9 +35,28 @@ async function createNotification(payload) {
     .single();
 }
 
+// ✅ TOKEN STORAGE
+async function upsertDeviceToken(userId, token, platform) {
+  return supabase
+    .from('device_tokens')
+    .upsert(
+      { user_id: userId, token, platform },
+      { onConflict: 'user_id,token' }
+    );
+}
+
+async function listDeviceTokens(userId) {
+  return supabase
+    .from('device_tokens')
+    .select('token')
+    .eq('user_id', userId);
+}
+
 module.exports = {
   listByUser,
   markRead,
   markAllRead,
   createNotification,
+  upsertDeviceToken,
+  listDeviceTokens,
 };

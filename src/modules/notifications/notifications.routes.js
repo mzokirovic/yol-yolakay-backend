@@ -5,5 +5,6 @@ const controller = require('./notifications.controller');
 router.get('/', controller.list);
 router.post('/:id/read', controller.markRead);
 router.post('/read-all', controller.markAllRead);
+router.post("/token", controller.registerToken);
 
 module.exports = router;
