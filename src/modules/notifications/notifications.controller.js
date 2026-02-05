@@ -28,4 +28,12 @@ async function registerToken(req, res, next) {
   } catch (e) { next(e); }
 }
 
-module.exports = { list, markRead, markAllRead, registerToken };
+async function testPush(req, res, next) {
+  try {
+    const result = await service.testPush(req);
+    res.json({ success: true, result });
+  } catch (e) { next(e); }
+}
+
+
+module.exports = { list, markRead, markAllRead, registerToken, testPush };

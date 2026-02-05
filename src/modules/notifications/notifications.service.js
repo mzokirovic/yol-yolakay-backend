@@ -1,4 +1,6 @@
 const repo = require('./notifications.repo');
+const repo = require('./notifications.repo');
+const { sendToToken } = require('../../core/fcm');
 
 function requireUserId(req) {
   const uid = req.header('x-user-id');
@@ -60,10 +62,40 @@ async function registerPushToken(req) {
   return true;
 }
 
+async function testPush(req) {
+  const uid = requireUserId(req);
+  const { title = "Test", body = "Hello" } = req.body || {};
+
+  const { data: tokens, error } = await repo.listDeviceTokens(uid);
+  if (error) throw error;
+
+  const tokenList = (tokens || []).map(t => t.token).filter(Boolean);
+  if (!tokenList.length) return { sent: 0, reason: "No device tokens for user" };
+
+  // DB ga ham yozib qo'yamiz (polling bilan ham ko'rinadi)
+  await repo.createNotification({
+    user_id: uid,
+    title,
+    body,
+    type: "TEST",
+    is_read: false,
+  });
+
+  let ok = 0, fail = 0;
+  for (const t of tokenList) {
+    try { await sendToToken(t, { title, body }); ok++; }
+    catch (e) { fail++; console.error("FCM_SEND_FAIL", e); }
+  }
+
+  return { sent: ok, failed: fail, tokens: tokenList.length };
+}
+
+
 module.exports = {
   requireUserId,
   list,
   markRead,
   markAllRead,
   registerPushToken,
+  testPush
 };

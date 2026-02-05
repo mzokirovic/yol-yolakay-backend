@@ -4,20 +4,23 @@ const { getMessaging } = require("firebase-admin/messaging");
 function initFcm() {
   if (getApps().length) return;
 
+  const b64 = process.env.FIREBASE_SERVICE_ACCOUNT_B64;
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
-  if (!raw) throw new Error("Missing FIREBASE_SERVICE_ACCOUNT_JSON");
 
-  const serviceAccount = JSON.parse(raw);
+  if (!b64 && !raw) {
+    throw new Error("Missing FIREBASE_SERVICE_ACCOUNT_B64 or FIREBASE_SERVICE_ACCOUNT_JSON");
+  }
 
-  initializeApp({
-    credential: cert(serviceAccount),
-  });
+  const serviceAccount = b64
+    ? JSON.parse(Buffer.from(b64, "base64").toString("utf8"))
+    : JSON.parse(raw);
+
+  initializeApp({ credential: cert(serviceAccount) });
 }
 
 async function sendToToken(token, payload) {
   initFcm();
 
-  // ✅ DATA-ONLY: background/closed holatda ham Android Service ishlaydi
   return getMessaging().send({
     token,
     android: { priority: "high" },
