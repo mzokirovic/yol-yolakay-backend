@@ -1,5 +1,4 @@
 const repo = require('./notifications.repo');
-const repo = require('./notifications.repo');
 const { sendToToken } = require('../../core/fcm');
 
 function requireUserId(req) {
