@@ -1,23 +1,18 @@
 const supabase = require('./db/supabase');
 
-function extractToken(req) {
-  const h = req.headers.authorization || '';
-  return h.startsWith('Bearer ') ? h.slice(7) : null;
-}
-
 module.exports = async function optionalAuth(req, res, next) {
   try {
-    const token = extractToken(req);
-    if (!token) return next(); // token yo'q => guest/fallback
+    const h = req.header('authorization') || '';
+    const m = h.match(/^Bearer\s+(.+)$/i);
+    if (!m) return next();
 
+    const token = m[1];
     const { data, error } = await supabase.auth.getUser(token);
-    if (error || !data?.user) {
-      return res.status(401).json({ success: false, error: 'INVALID_TOKEN' });
+    if (!error && data?.user) {
+      req.user = { id: data.user.id, phone: data.user.phone, email: data.user.email };
     }
-
-    req.user = data.user;
-    next();
-  } catch (e) {
-    next(e);
+  } catch (_) {
+    // ignore
   }
+  next();
 };
