@@ -1,10 +1,15 @@
 const repo = require('./notifications.repo');
 const { sendToToken } = require('../../core/fcm');
 
-function requireUserId(req) {
-  const uid = req.header('x-user-id');
+function requireActorId(req) {
+  const uid =
+    req.actorId ||
+    req.user?.id ||
+    req.header('x-user-id') ||
+    req.header('x-device-id');
+
   if (!uid) {
-    const err = new Error('x-user-id header is required');
+    const err = new Error('actor id is required (Authorization Bearer OR x-user-id OR x-device-id)');
     err.statusCode = 400;
     throw err;
   }
@@ -12,7 +17,7 @@ function requireUserId(req) {
 }
 
 async function list(req) {
-  const uid = requireUserId(req);
+  const uid = requireActorId(req);
   const limit = Math.min(Number(req.query.limit || 50), 100);
 
   const { data, error } = await repo.listByUser(uid, limit);
@@ -22,7 +27,7 @@ async function list(req) {
 }
 
 async function markRead(req) {
-  const uid = requireUserId(req);
+  const uid = requireActorId(req);
   const id = req.params.id;
 
   const { data, error } = await repo.markRead(uid, id);
@@ -32,7 +37,7 @@ async function markRead(req) {
 }
 
 async function markAllRead(req) {
-  const uid = requireUserId(req);
+  const uid = requireActorId(req);
 
   const { error } = await repo.markAllRead(uid);
   if (error) throw error;
@@ -40,13 +45,8 @@ async function markAllRead(req) {
   return true;
 }
 
-/**
- * ✅ Route: POST /api/notifications/token
- * Header: x-user-id
- * Body: { token, platform }
- */
 async function registerPushToken(req) {
-  const uid = requireUserId(req);
+  const uid = requireActorId(req);
   const { token, platform = 'android' } = req.body || {};
 
   if (!token) {
@@ -62,18 +62,17 @@ async function registerPushToken(req) {
 }
 
 async function testPush(req) {
-  const uid = requireUserId(req);
+  const uid = requireActorId(req);
   const { title = "Test", body = "Hello" } = req.body || {};
 
   const { data: tokens, error } = await repo.listDeviceTokens(uid);
   if (error) throw error;
 
   const tokenList = (tokens || []).map(t => t.token).filter(Boolean);
-  if (!tokenList.length) return { sent: 0, reason: "No device tokens for user" };
+  if (!tokenList.length) return { sent: 0, reason: "No device tokens for actor" };
 
-  // DB ga ham yozib qo'yamiz (polling bilan ham ko'rinadi)
   await repo.createNotification({
-    user_id: uid,
+    user_id: uid,   // ✅ shu ustun oldin ham deviceId saqlagan, endi userId ham saqlaydi
     title,
     body,
     type: "TEST",
@@ -89,9 +88,8 @@ async function testPush(req) {
   return { sent: ok, failed: fail, tokens: tokenList.length };
 }
 
-
 module.exports = {
-  requireUserId,
+  requireActorId,
   list,
   markRead,
   markAllRead,

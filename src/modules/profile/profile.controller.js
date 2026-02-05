@@ -1,10 +1,22 @@
 const service = require('./profile.service');
 
 function getUserId(req) {
-  // Android’dan yuboramiz: header("x-user-id", ...)
-  const userId = req.headers['x-user-id'] || req.query.userId;
+  // ✅ 1) Agar Bearer token bilan kelsa (optionalAuth middleware qo'yilgan bo'lsa)
+  const tokenUserId = req.user?.id;
+
+  // ✅ 2) Eski Android flow (header("x-user-id", ...))
+  const headerUserId = req.headers['x-user-id'];
+
+  // ✅ 3) Guest/device flow (header("X-Device-Id", ...)) — BackendClient defaultRequest qo'shadi
+  const deviceId = req.headers['x-device-id'];
+
+  // ⚠️ 4) Vaqtincha dev fallback (keyin security uchun olib tashlaymiz)
+  const queryUserId = req.query.userId;
+
+  const userId = tokenUserId || headerUserId || deviceId || queryUserId;
+
   if (!userId) {
-    const err = new Error("x-user-id yuborilmadi (yoki ?userId=...)");
+    const err = new Error("user id topilmadi (Bearer OR x-user-id OR x-device-id)");
     err.status = 400;
     throw err;
   }

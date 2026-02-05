@@ -43,3 +43,6 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Senior Server running on port ${PORT}`);
 });
+
+const authRoutes = require('./src/modules/auth/auth.routes');
+app.use('/api/auth', authRoutes);

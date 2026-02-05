@@ -2,6 +2,9 @@ const express = require('express');
 const router = express.Router();
 const controller = require('./profile.controller');
 
+const optionalAuth = require('../../core/optionalAuth');
+router.use(optionalAuth); // ✅ faqat qo'shildi, qolganiga tegmadik
+
 router.get('/me', controller.getMe);
 router.put('/me', controller.updateMe);
 
