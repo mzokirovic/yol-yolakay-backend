@@ -1,4 +1,33 @@
 const repo = require('./trips.repo');
+// ✅ 1. Notification tizimini ulaymiz
+const notifRepo = require('../notifications/notifications.repo');
+const { sendToToken } = require('../../core/fcm');
+
+// ✅ 2. Yordamchi funksiya: Push Notification yuborish
+async function notifyUser(userId, title, body, type, data = {}) {
+  try {
+    if (!userId) return;
+
+    // Userning tokenlarini olamiz
+    const { data: tokens } = await notifRepo.listDeviceTokens(userId);
+    if (!tokens || tokens.length === 0) return;
+
+    const payload = {
+      title,
+      body,
+      type, // Masalan: TRIP_REQUEST, TRIP_APPROVED
+      ...data
+    };
+
+    // Barcha tokenlarga parallel yuboramiz
+    const promises = tokens.map(t => sendToToken(t.token, payload));
+    await Promise.allSettled(promises);
+    console.log(`🔔 Notification sent to ${userId}: ${title}`);
+  } catch (e) {
+    console.error(`⚠️ Notification error for ${userId}:`, e.message);
+    // Xato bo'lsa ham kod to'xtamasligi kerak, bu fon jarayoni
+  }
+}
 
 async function assertDriver(tripId, driverId) {
   const { data: trip, error } = await repo.getTripById(tripId);
@@ -56,7 +85,7 @@ exports.createTrip = async (data) => {
     to_city: toLocation,
     departure_time: departureTime,
     price: priceNum,
-    available_seats: seatsNum, // keyin recalc ham qiladi
+    available_seats: seatsNum,
 
     driver_name: "Test Haydovchi",
     car_model: "Chevrolet",
@@ -74,7 +103,6 @@ exports.createTrip = async (data) => {
 
   await repo.initTripSeats(newTrip.id, seatsNum);
 
-  // ✅ drift bo‘lmasin
   const { error: e2 } = await repo.recalcTripAvailableSeats(newTrip.id);
   if (e2) throw e2;
 
@@ -103,7 +131,7 @@ exports.getTripDetails = async (tripId) => {
   return { trip, seats };
 };
 
-// -------------------- MVP+ pending flow --------------------
+// -------------------- MVP+ pending flow (Notifications Added) --------------------
 
 exports.requestSeat = async ({ tripId, seatNo, clientId, holderName }) => {
   const { data: updated, error } = await repo.requestSeat({
@@ -123,7 +151,21 @@ exports.requestSeat = async ({ tripId, seatNo, clientId, holderName }) => {
   const { error: e2 } = await repo.recalcTripAvailableSeats(tripId);
   if (e2) throw e2;
 
-  return await exports.getTripDetails(tripId);
+  // Ma'lumotlarni qaytarishdan oldin notification yuboramiz
+  const result = await exports.getTripDetails(tripId);
+
+  // ✅ SENIOR LOGIC: Haydovchiga xabar beramiz
+  if (result.trip && result.trip.driver_id) {
+      await notifyUser(
+          result.trip.driver_id,
+          "Yangi buyurtma! 🚖",
+          `${holderName || "Bir yo'lovchi"} joy band qilmoqchi.`,
+          "TRIP_REQUEST",
+          { trip_id: tripId, seat_no: String(seatNo) }
+      );
+  }
+
+  return result;
 };
 
 exports.cancelRequest = async ({ tripId, seatNo, clientId }) => {
@@ -133,11 +175,29 @@ exports.cancelRequest = async ({ tripId, seatNo, clientId }) => {
   const { error: e2 } = await repo.recalcTripAvailableSeats(tripId);
   if (e2) throw e2;
 
-  return await exports.getTripDetails(tripId);
+  const result = await exports.getTripDetails(tripId);
+
+  // ✅ SENIOR LOGIC: Haydovchiga xabar beramiz (Bekor qilindi)
+  if (result.trip && result.trip.driver_id) {
+      await notifyUser(
+          result.trip.driver_id,
+          "Buyurtma bekor qilindi ⚠️",
+          "Yo'lovchi joy so'rovini bekor qildi.",
+          "TRIP_CANCELLED",
+          { trip_id: tripId, seat_no: String(seatNo) }
+      );
+  }
+
+  return result;
 };
 
 exports.approveSeat = async ({ tripId, seatNo, driverId }) => {
   await assertDriver(tripId, driverId);
+
+  // 1. Avval kim o'tirganini bilishimiz kerak (notification uchun)
+  // Buning uchun hozirgi holatni olamiz
+  const { data: seatsBefore } = await repo.getTripSeats(tripId);
+  const targetSeat = seatsBefore.find(s => s.seat_no === parseInt(seatNo));
 
   const { data: updated, error } = await repo.approveSeat({ tripId, seatNo });
   if (error) throw error;
@@ -151,17 +211,43 @@ exports.approveSeat = async ({ tripId, seatNo, driverId }) => {
   const { error: e2 } = await repo.recalcTripAvailableSeats(tripId);
   if (e2) throw e2;
 
+  // ✅ SENIOR LOGIC: Yo'lovchiga xabar beramiz (Tasdiqlandi)
+  if (targetSeat && targetSeat.client_id) {
+      await notifyUser(
+          targetSeat.client_id,
+          "So'rovingiz qabul qilindi! ✅",
+          "Haydovchi buyurtmangizni tasdiqladi. Yo'lga tayyorlaning!",
+          "TRIP_APPROVED",
+          { trip_id: tripId, seat_no: String(seatNo) }
+      );
+  }
+
   return await exports.getTripDetails(tripId);
 };
 
 exports.rejectSeat = async ({ tripId, seatNo, driverId }) => {
   await assertDriver(tripId, driverId);
 
+  // 1. Avval kim o'tirganini bilamiz
+  const { data: seatsBefore } = await repo.getTripSeats(tripId);
+  const targetSeat = seatsBefore.find(s => s.seat_no === parseInt(seatNo));
+
   const { error } = await repo.rejectSeat({ tripId, seatNo });
   if (error) throw error;
 
   const { error: e2 } = await repo.recalcTripAvailableSeats(tripId);
   if (e2) throw e2;
+
+  // ✅ SENIOR LOGIC: Yo'lovchiga xabar beramiz (Rad etildi)
+  if (targetSeat && targetSeat.client_id) {
+      await notifyUser(
+          targetSeat.client_id,
+          "So'rovingiz rad etildi ❌",
+          "Afsuski, haydovchi buyurtmani qabul qilmadi.",
+          "TRIP_REJECTED",
+          { trip_id: tripId, seat_no: String(seatNo) }
+      );
+  }
 
   return await exports.getTripDetails(tripId);
 };
