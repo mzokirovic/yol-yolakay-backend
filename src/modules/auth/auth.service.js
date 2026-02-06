@@ -6,6 +6,16 @@ function badRequest(msg) {
   return err;
 }
 
+
+// ✅ sendOtp funksiyasini yarating
+async function sendOtp(phone) {
+    const { data, error } = await supabase.auth.signInWithOtp({
+        phone: phone
+    });
+    if (error) throw error;
+    return data;
+}
+
 // ... sendOtp o'zgarishsiz qoladi ...
 
 async function verifyOtp(req) {
