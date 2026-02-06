@@ -23,13 +23,29 @@ async function sendToToken(token, payload) {
 
   return getMessaging().send({
     token,
-    android: { priority: "high" },
+    // ✅ SENIOR FIX: "ttl: 0" - bu xabarni ushlab turmasdan darhol yetkazishni ta'minlaydi
+    android: {
+      priority: "high",
+      ttl: 0,
+    },
+    // iOS uchun ham (kelajakda kerak bo'ladi)
+    apns: {
+      payload: {
+        aps: {
+          contentAvailable: true,
+        },
+      },
+      headers: {
+        "apns-priority": "10", // 10 = Immediate delivery
+      },
+    },
     data: {
       notification_id: String(payload.notification_id ?? ""),
       trip_id: String(payload.trip_id ?? ""),
       thread_id: String(payload.thread_id ?? ""),
       title: String(payload.title ?? ""),
       body: String(payload.body ?? ""),
+      type: String(payload.type ?? "GENERAL") // Type qo'shish foydali
     },
   });
 }
