@@ -1,11 +1,12 @@
 const tripService = require('./trips.service');
+const supabase = require('../../core/db/supabase'); // ✅ Supabase ulash shart
 
 // Xavfsiz ID olish
 function getUserId(req) {
   const userId = req.headers['x-user-id'] || req.query.userId;
   if (!userId) {
     const err = new Error("x-user-id yuborilmadi (Unauthorized)");
-    err.status = 401; // 400 emas 401
+    err.status = 401;
     throw err;
   }
   return String(userId);
@@ -23,34 +24,58 @@ function parseSeatNo(seatNo) {
 
 // --- CONTROLLER METHODS ---
 
+// ✅ YANGI: Pitaklarni olish
+exports.getPopularPoints = async (req, res) => {
+  try {
+    const { city } = req.query; // ?city=Toshkent (optional)
+
+    let query = supabase
+      .from('popular_points')
+      .select('*')
+      .eq('is_active', true);
+
+    if (city) {
+        // Katta-kichik harfni inobatga olmay qidirish (ilike)
+        query = query.ilike('city_name', `%${city}%`);
+    }
+
+    const { data, error } = await query;
+
+    if (error) throw error;
+
+    return res.status(200).json({ success: true, count: data.length, data });
+  } catch (error) {
+    console.error("Points Error:", error.message);
+    return res.status(500).json({ success: false, error: { message: error.message } });
+  }
+};
+
 exports.publishTrip = async (req, res) => {
   try {
     // 1. SECURITY: Driver ID faqat tokendan
     const userId = getUserId(req);
-
     const b = req.body || {};
 
-    // 2. Data Mapping (CamelCase standart)
+    // 2. Data Mapping
     const tripData = {
       fromLocation: b.fromLocation ?? b.from_city,
       toLocation: b.toLocation ?? b.to_city,
-
       // Yangi: Point ID (agar bo'lsa)
       fromPointId: b.fromPointId || null,
       toPointId: b.toPointId || null,
-
+      // Koordinatalar
       fromLat: b.fromLat ?? b.start_lat,
       fromLng: b.fromLng ?? b.start_lng,
       toLat: b.toLat ?? b.end_lat,
       toLng: b.toLng ?? b.end_lng,
-
+      // Vaqt va narx
       date: b.date,
       time: b.time,
       price: parseFloat(b.price),
       seats: parseInt(b.seats ?? b.available_seats, 10),
     };
 
-    // 3. Simple Validation (Complex logic Service ichida)
+    // 3. Simple Validation
     if (!tripData.fromLocation || !tripData.toLocation) {
       return res.status(400).json({ success: false, error: { message: "Manzillar kiritilmadi" } });
     }
@@ -59,7 +84,6 @@ exports.publishTrip = async (req, res) => {
     }
 
     // 4. Call Service
-    // userId ni alohida argument qilib beramiz
     const newTrip = await tripService.createTrip(tripData, userId);
 
     // 5. Success
@@ -67,13 +91,11 @@ exports.publishTrip = async (req, res) => {
       success: true,
       message: "Safar muvaffaqiyatli e'lon qilindi!",
       trip: newTrip,
-      // Frontga ogohlantirish (agar narx juda arzon bo'lsa)
       warning: newTrip.is_price_low ? "Diqqat: Narx bozor narxidan past." : null
     });
 
   } catch (error) {
     console.error("Publish Error:", error.message);
-    // Userga tushunarli xato qaytarish
     return res.status(400).json({ success: false, error: { message: error.message } });
   }
 };
@@ -108,10 +130,7 @@ exports.getTripDetails = async (req, res) => {
   }
 };
 
-// ... Qolgan methodlar (blockSeat, requestSeat, etc) o'zgarishsiz qoladi,
-// chunki ular `tripService` metodlarini to'g'ri chaqiryapti.
-// Faqat `userId` olishda `getUserId` ishlatilganiga ishonch hosil qiling.
-// (Siz yuborgan faylda bu qismlar allaqachon to'g'ri edi).
+// ----------------- SEAT ACTIONS (To'liq Versiya) -----------------
 
 exports.requestSeat = async (req, res) => {
   try {
@@ -120,11 +139,16 @@ exports.requestSeat = async (req, res) => {
     const seat = parseSeatNo(seatNo);
     const { holderName } = req.body || {};
 
-    const data = await tripService.requestSeat({ tripId: id, seatNo: seat, clientId: userId, holderName });
+    const data = await tripService.requestSeat({
+        tripId: id,
+        seatNo: seat,
+        clientId: userId,
+        holderName
+    });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    const status = e.code === 'SEAT_NOT_AVAILABLE' ? 409 : 500;
-    return res.status(status).json({ success: false, error: { message: e.message } });
+    if (e.code === 'SEAT_NOT_AVAILABLE') return res.status(409).json({ success: false, error: { message: e.message } });
+    return res.status(500).json({ success: false, error: { message: e.message } });
   }
 };
 
@@ -134,7 +158,11 @@ exports.cancelRequest = async (req, res) => {
     const { id, seatNo } = req.params;
     const seat = parseSeatNo(seatNo);
 
-    const data = await tripService.cancelRequest({ tripId: id, seatNo: seat, clientId: userId });
+    const data = await tripService.cancelRequest({
+        tripId: id,
+        seatNo: seat,
+        clientId: userId
+    });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
     return res.status(500).json({ success: false, error: { message: e.message } });
@@ -147,10 +175,15 @@ exports.approveSeat = async (req, res) => {
     const { id, seatNo } = req.params;
     const seat = parseSeatNo(seatNo);
 
-    const data = await tripService.approveSeat({ tripId: id, seatNo: seat, driverId: userId });
+    const data = await tripService.approveSeat({
+        tripId: id,
+        seatNo: seat,
+        driverId: userId
+    });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    return res.status(e.code === 'FORBIDDEN' ? 403 : 500).json({ success: false, error: { message: e.message } });
+    const status = e.code === 'FORBIDDEN' ? 403 : 500;
+    return res.status(status).json({ success: false, error: { message: e.message } });
   }
 };
 
@@ -160,10 +193,15 @@ exports.rejectSeat = async (req, res) => {
     const { id, seatNo } = req.params;
     const seat = parseSeatNo(seatNo);
 
-    const data = await tripService.rejectSeat({ tripId: id, seatNo: seat, driverId: userId });
+    const data = await tripService.rejectSeat({
+        tripId: id,
+        seatNo: seat,
+        driverId: userId
+    });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    return res.status(e.code === 'FORBIDDEN' ? 403 : 500).json({ success: false, error: { message: e.message } });
+    const status = e.code === 'FORBIDDEN' ? 403 : 500;
+    return res.status(status).json({ success: false, error: { message: e.message } });
   }
 };
 
@@ -173,10 +211,15 @@ exports.blockSeat = async (req, res) => {
     const { id, seatNo } = req.params;
     const seat = parseSeatNo(seatNo);
 
-    const data = await tripService.blockSeat({ tripId: id, seatNo: seat, driverId: userId });
+    const data = await tripService.blockSeat({
+        tripId: id,
+        seatNo: seat,
+        driverId: userId
+    });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    return res.status(e.code === 'FORBIDDEN' ? 403 : 500).json({ success: false, error: { message: e.message } });
+    const status = e.code === 'FORBIDDEN' ? 403 : 500;
+    return res.status(status).json({ success: false, error: { message: e.message } });
   }
 };
 
@@ -186,9 +229,14 @@ exports.unblockSeat = async (req, res) => {
     const { id, seatNo } = req.params;
     const seat = parseSeatNo(seatNo);
 
-    const data = await tripService.unblockSeat({ tripId: id, seatNo: seat, driverId: userId });
+    const data = await tripService.unblockSeat({
+        tripId: id,
+        seatNo: seat,
+        driverId: userId
+    });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    return res.status(e.code === 'FORBIDDEN' ? 403 : 500).json({ success: false, error: { message: e.message } });
+    const status = e.code === 'FORBIDDEN' ? 403 : 500;
+    return res.status(status).json({ success: false, error: { message: e.message } });
   }
 };

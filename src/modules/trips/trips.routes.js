@@ -6,19 +6,19 @@ router.post('/publish', controller.publishTrip);
 router.get('/search', controller.searchTrips);
 router.get('/my', controller.getMyTrips);
 
+// ✅ YANGI: Popular Points (ID'li rutdan oldin bo'lishi shart)
+router.get('/points', controller.getPopularPoints);
+
 router.get('/:id', controller.getTripDetails);
 
 // Seat actions
 router.post('/:id/seats/:seatNo/block', controller.blockSeat);
 router.post('/:id/seats/:seatNo/unblock', controller.unblockSeat);
 
-// ✅ MVP+ flow
-router.post('/:id/seats/:seatNo/request', controller.requestSeat);  // passenger
-router.post('/:id/seats/:seatNo/cancel', controller.cancelRequest); // passenger
-router.post('/:id/seats/:seatNo/approve', controller.approveSeat);  // driver
-router.post('/:id/seats/:seatNo/reject', controller.rejectSeat);    // driver
-
-// (old endpoint qolsa ham bo'ladi, hozir ishlatmaymiz)
-// router.post('/:id/seats/:seatNo/book', controller.bookSeat);
+// MVP+ flow
+router.post('/:id/seats/:seatNo/request', controller.requestSeat);
+router.post('/:id/seats/:seatNo/cancel', controller.cancelRequest);
+router.post('/:id/seats/:seatNo/approve', controller.approveSeat);
+router.post('/:id/seats/:seatNo/reject', controller.rejectSeat);
 
 module.exports = router;
