@@ -1,52 +1,51 @@
+// src/modules/notifications/notifications.controller.js
+
 const service = require('./notifications.service');
-const { resolveActor } = require('../../core/actor');
 
-function attachActor(req) {
-  const a = resolveActor(req);
-  req.actor = a;
-  req.actorId = a.actorId;
-  req.actorUserId = a.userId;
-  req.actorDeviceId = a.deviceId;
+function getUserId(req) {
+  // 🚨 O'ZGARISH: Faqat Headerdan olinadi. Query param (URL) dan olish taqiqlandi.
+  const userId = req.headers['x-user-id'];
+  
+  if (!userId) {
+      if (req.user && req.user.id) return req.user.id;
+      // Agar ID bo'lmasa, Notification ko'rsatib bo'lmaydi
+      const err = new Error("Unauthorized (User ID missing)");
+      err.status = 401;
+      throw err;
+  }
+  return String(userId);
 }
 
-async function list(req, res, next) {
+exports.listNotifications = async (req, res) => {
   try {
-    attachActor(req);
-    const data = await service.list(req);
-    res.json({ success: true, data });
-  } catch (e) { next(e); }
-}
+    const userId = getUserId(req);
+    const list = await service.listNotifications(userId);
+    return res.json({ success: true, count: list.length, data: list });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: { message: e.message } });
+  }
+};
 
-async function markRead(req, res, next) {
+exports.markRead = async (req, res) => {
   try {
-    attachActor(req);
-    const data = await service.markRead(req);
-    res.json({ success: true, data });
-  } catch (e) { next(e); }
-}
+    const userId = getUserId(req);
+    const { id } = req.params;
+    await service.markRead(id); // userId kerak emas, id unique
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: { message: e.message } });
+  }
+};
 
-async function markAllRead(req, res, next) {
+exports.registerPushToken = async (req, res) => {
   try {
-    attachActor(req);
-    await service.markAllRead(req);
-    res.json({ success: true });
-  } catch (e) { next(e); }
-}
+    const userId = getUserId(req);
+    const { token } = req.body;
+    if (!token) return res.status(400).json({ success: false, error: { message: "Token required" } });
 
-async function registerToken(req, res, next) {
-  try {
-    attachActor(req);
-    await service.registerPushToken(req);
-    res.json({ success: true });
-  } catch (e) { next(e); }
-}
-
-async function testPush(req, res, next) {
-  try {
-    attachActor(req);
-    const result = await service.testPush(req);
-    res.json({ success: true, result });
-  } catch (e) { next(e); }
-}
-
-module.exports = { list, markRead, markAllRead, registerToken, testPush };
+    await service.registerPushToken(userId, token);
+    return res.json({ success: true });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: { message: e.message } });
+  }
+};
