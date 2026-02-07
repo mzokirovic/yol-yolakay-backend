@@ -1,14 +1,15 @@
-// src/modules/notifications/notifications.controller.js
+// /home/mzokirovic/Desktop/yol-yolakay-backend/src/modules/notifications/notifications.controller.js
 
 const service = require('./notifications.service');
 
+// User ID ni headerdan olish
 function getUserId(req) {
-  // 🚨 O'ZGARISH: Faqat Headerdan olinadi. Query param (URL) dan olish taqiqlandi.
   const userId = req.headers['x-user-id'];
-  
+
   if (!userId) {
+      // Agar token bo'lsa
       if (req.user && req.user.id) return req.user.id;
-      // Agar ID bo'lmasa, Notification ko'rsatib bo'lmaydi
+
       const err = new Error("Unauthorized (User ID missing)");
       err.status = 401;
       throw err;
@@ -16,36 +17,65 @@ function getUserId(req) {
   return String(userId);
 }
 
-exports.listNotifications = async (req, res) => {
+// 1. Ro'yxatni olish (GET /)
+exports.list = async (req, res, next) => {
   try {
     const userId = getUserId(req);
-    const list = await service.listNotifications(userId);
-    return res.json({ success: true, count: list.length, data: list });
+    // Servicega REQ emas, USERID beramiz
+    const data = await service.listNotifications(userId);
+    res.json({ success: true, count: data.length, data });
   } catch (e) {
-    return res.status(500).json({ success: false, error: { message: e.message } });
+    next(e);
   }
 };
 
-exports.markRead = async (req, res) => {
+// 2. O'qilgan deb belgilash (POST /:id/read)
+exports.markRead = async (req, res, next) => {
   try {
     const userId = getUserId(req);
     const { id } = req.params;
-    await service.markRead(id); // userId kerak emas, id unique
-    return res.json({ success: true });
+    await service.markRead(userId, id);
+    res.json({ success: true });
   } catch (e) {
-    return res.status(500).json({ success: false, error: { message: e.message } });
+    next(e);
   }
 };
 
-exports.registerPushToken = async (req, res) => {
+// 3. Hammasini o'qilgan deb belgilash (POST /read-all)
+exports.markAllRead = async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    await service.markAllRead(userId);
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+};
+
+// 4. Push tokenni saqlash (POST /token)
+exports.registerToken = async (req, res, next) => {
   try {
     const userId = getUserId(req);
     const { token } = req.body;
-    if (!token) return res.status(400).json({ success: false, error: { message: "Token required" } });
+
+    if (!token) {
+        return res.status(400).json({ success: false, error: { message: "Token required" } });
+    }
 
     await service.registerPushToken(userId, token);
-    return res.json({ success: true });
+    res.json({ success: true });
   } catch (e) {
-    return res.status(500).json({ success: false, error: { message: e.message } });
+    next(e);
   }
+};
+
+// 5. Test Push (POST /test)
+exports.testPush = async (req, res, next) => {
+    try {
+        const userId = getUserId(req);
+        const result = await service.testPush(userId);
+        res.json({ success: true, result });
+    } catch (e) {
+        next(e);
+    }
 };

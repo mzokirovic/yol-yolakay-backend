@@ -1,3 +1,5 @@
+// /home/mzokirovic/Desktop/yol-yolakay-backend/src/modules/notifications/notifications.repo.js
+
 const supabase = require('../../core/db/supabase');
 
 async function listByUser(userId, limit = 50) {
@@ -9,11 +11,12 @@ async function listByUser(userId, limit = 50) {
     .limit(limit);
 }
 
+// user_id ni ham tekshiramiz, birov birovning xabarini o'qimasligi uchun
 async function markRead(userId, id) {
   return supabase
     .from('notifications')
     .update({ is_read: true })
-    .eq('user_id', userId)
+    .eq('user_id', userId) 
     .eq('id', id)
     .select()
     .single();
@@ -35,13 +38,13 @@ async function createNotification(payload) {
     .single();
 }
 
-// ✅ TOKEN STORAGE
+// Tokenni saqlash yoki yangilash
 async function upsertDeviceToken(userId, token, platform) {
   return supabase
     .from('device_tokens')
     .upsert(
       { user_id: userId, token, platform },
-      { onConflict: 'user_id,token' }
+      { onConflict: 'user_id,token' } // Agar bir xil user va token bo'lsa, update qiladi
     );
 }
 
