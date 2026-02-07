@@ -26,21 +26,23 @@ function badRequest(msg) {
   return err;
 }
 
-// ✅ SEND OTP (O'ZGARDI: Plyusni olib tashlaymiz)
+// ✅ SEND OTP (Majburiy E.164 Formati: +998...)
 async function sendOtp(phone) {
     if (typeof phone !== 'string') {
         throw new Error("Phone must be a string");
     }
 
-    // 1. RAQAMNI TOZALASH
-    // Faqat raqamlarni qoldiramiz. Plyus (+), probel, tire - hammasi ketadi.
-    // Masalan: "+998 90 123-45-67" -> "998901234567"
+    // 1. TOZALASH: Faqat raqamlarni qoldiramiz
     let cleanPhone = phone.replace(/[^\d]/g, '');
 
-    console.log(`🚀 Sending OTP via AuthClient to: '${cleanPhone}' (No Plus)`);
+    // 2. FORMATLASH: Boshiga majburan + qo'shamiz
+    // Natija har doim: +998901234567 ko'rinishida bo'ladi
+    const finalPhone = `+${cleanPhone}`;
+
+    console.log(`🚀 Sending OTP via AuthClient to: '${finalPhone}'`);
 
     const { data, error } = await authClient.auth.signInWithOtp({
-        phone: cleanPhone,
+        phone: finalPhone,
     });
 
     if (error) {
@@ -50,14 +52,15 @@ async function sendOtp(phone) {
     return data;
 }
 
-// ✅ VERIFY OTP (Bu yerda ham plyussiz tekshiramiz)
+// ✅ VERIFY OTP
 async function verifyOtp(req) {
   const body = req.body || {};
   let phone = body.phone;
 
-  // Verify qilganda ham plyusni olib tashlaymiz
+  // Verify qilganda ham formatlaymiz
   if (phone) {
-      phone = phone.replace(/[^\d]/g, '');
+      const clean = phone.replace(/[^\d]/g, '');
+      phone = `+${clean}`;
   }
 
   const code = body.code || body.token;
