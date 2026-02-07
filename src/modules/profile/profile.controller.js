@@ -1,24 +1,25 @@
+// /home/mzokirovic/Desktop/yol-yolakay-backend/src/modules/profile/profile.controller.js
+
 const service = require('./profile.service');
-const supabase = require('../../core/db/supabase'); // ✅ YANGI: Reference data olish uchun
+const supabase = require('../../core/db/supabase');
 
 function getUserId(req) {
-  // ✅ 1) Agar Bearer token bilan kelsa (optionalAuth middleware qo'yilgan bo'lsa)
+  // 1) Token (Eng ishonchli)
   const tokenUserId = req.user?.id;
 
-  // ✅ 2) Eski Android flow (header("x-user-id", ...))
+  // 2) Header (Android ilovadan keladigan)
   const headerUserId = req.headers['x-user-id'];
 
-  // ✅ 3) Guest/device flow (header("X-Device-Id", ...))
+  // 3) Device ID (Mehmonlar uchun)
   const deviceId = req.headers['x-device-id'];
 
-  // ⚠️ 4) Vaqtincha dev fallback
-  const queryUserId = req.query.userId;
+  // 🚨 O'ZGARISH: Query param (req.query.userId) O'CHIRILDI. Bu xavfli edi.
 
-  const userId = tokenUserId || headerUserId || deviceId || queryUserId;
+  const userId = tokenUserId || headerUserId || deviceId;
 
   if (!userId) {
-    const err = new Error("user id topilmadi (Bearer OR x-user-id OR x-device-id)");
-    err.status = 400;
+    const err = new Error("Siz tizimga kirmagansiz (User ID topilmadi)");
+    err.status = 401; // 400 emas, 401 (Unauthorized)
     throw err;
   }
   return String(userId);
@@ -62,7 +63,6 @@ exports.getMyVehicle = async (req, res, next) => {
   }
 };
 
-// Mavjud upsertMyVehicle (Service orqali ishlaydi)
 exports.upsertMyVehicle = async (req, res, next) => {
   try {
     const userId = getUserId(req);
@@ -82,10 +82,8 @@ exports.upsertMyVehicle = async (req, res, next) => {
   }
 };
 
-// ✅ YANGI: Mashina turlarini olish (Brendlar va Modellar)
 exports.getCarReference = async (req, res, next) => {
   try {
-    // Brandlarni modellari bilan birga olamiz (Nested Query)
     const { data, error } = await supabase
       .from('car_brands')
       .select('id, name, car_models ( id, name )');
@@ -94,39 +92,7 @@ exports.getCarReference = async (req, res, next) => {
 
     return res.status(200).json({ success: true, data });
   } catch (error) {
-    // Agar baza hali tayyor bo'lmasa yoki xato bo'lsa
     console.error("Car Ref Error:", error.message);
     return res.status(500).json({ success: false, error: { message: error.message } });
   }
-};
-
-// ✅ YANGI: To'g'ridan-to'g'ri Controller orqali saqlash (Alternativ variant)
-// Agar service.js da upsertVehicle bo'lsa, tepadagi upsertMyVehicle yetarli.
-// Lekin biz "profile/vehicle" endpointi uchun buni ham qo'shib qo'yamiz.
-exports.upsertVehicleDirect = async (req, res, next) => {
-    try {
-        const userId = getUserId(req);
-        const b = req.body;
-
-        const vehicleData = {
-            user_id: userId,
-            make: b.make,
-            model: b.model,
-            color: b.color,
-            plate: b.plate,
-            seats: parseInt(b.seats || 4)
-        };
-
-        const { data, error } = await supabase
-            .from('vehicles')
-            .upsert(vehicleData)
-            .select()
-            .single();
-
-        if (error) throw error;
-
-        return res.status(200).json({ success: true, message: "Mashina saqlandi", data });
-    } catch (error) {
-        next(error);
-    }
 };

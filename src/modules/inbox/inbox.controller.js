@@ -1,15 +1,23 @@
+// /home/mzokirovic/Desktop/yol-yolakay-backend/src/modules/inbox/inbox.controller.js
+
 const service = require('./inbox.service');
 
 function getUserId(req) {
-  const userId = req.headers['x-user-id'] || req.query.userId;
-  if (!userId) return null;
+  // 🚨 O'ZGARISH: Faqat Headerdan olinadi. Query param (URL) dan olish taqiqlandi.
+  const userId = req.headers['x-user-id'];
+  
+  if (!userId) {
+      // Agar middleware (req.user) bo'lsa, o'shani ham tekshirish mumkin
+      if (req.user && req.user.id) return req.user.id;
+      return null;
+  }
   return String(userId);
 }
 
 exports.listThreads = async (req, res) => {
   try {
     const userId = getUserId(req);
-    if (!userId) return res.status(400).json({ success: false, error: { message: "x-user-id required" } });
+    if (!userId) return res.status(401).json({ success: false, error: { message: "Unauthorized (x-user-id missing)" } });
 
     const data = await service.listThreads(userId);
     return res.status(200).json({ success: true, count: data.length, data });
@@ -21,7 +29,7 @@ exports.listThreads = async (req, res) => {
 exports.createThread = async (req, res) => {
   try {
     const userId = getUserId(req);
-    if (!userId) return res.status(400).json({ success: false, error: { message: "x-user-id required" } });
+    if (!userId) return res.status(401).json({ success: false, error: { message: "Unauthorized" } });
 
     const { peerId, tripId } = req.body || {};
     if (!peerId) return res.status(400).json({ success: false, error: { message: "peerId required" } });
@@ -36,7 +44,7 @@ exports.createThread = async (req, res) => {
 exports.getThread = async (req, res) => {
   try {
     const userId = getUserId(req);
-    if (!userId) return res.status(400).json({ success: false, error: { message: "x-user-id required" } });
+    if (!userId) return res.status(401).json({ success: false, error: { message: "Unauthorized" } });
 
     const { id } = req.params;
     const data = await service.getThread({ userId, threadId: id });
@@ -51,7 +59,7 @@ exports.getThread = async (req, res) => {
 exports.sendMessage = async (req, res) => {
   try {
     const userId = getUserId(req);
-    if (!userId) return res.status(400).json({ success: false, error: { message: "x-user-id required" } });
+    if (!userId) return res.status(401).json({ success: false, error: { message: "Unauthorized" } });
 
     const { id } = req.params;
     const { text } = req.body || {};

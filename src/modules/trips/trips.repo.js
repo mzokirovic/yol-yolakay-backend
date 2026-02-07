@@ -1,3 +1,5 @@
+// /home/mzokirovic/Desktop/yol-yolakay-backend/src/modules/trips/trips.repo.js
+
 const supabase = require('../../core/db/supabase');
 
 function nextDateISO(dateStr /* YYYY-MM-DD */) {
@@ -46,14 +48,51 @@ exports.searchTrips = async ({ from, to, date, passengers }) => {
   return await query;
 };
 
-exports.getMyTrips = async ({ driverName }) => {
-  let query = supabase
+// ✅ YANGI: User ID bo'yicha Haydovchi va Yo'lovchi e'lonlarini olish
+exports.getUserTrips = async (userId) => {
+  // A) Men Haydovchi bo'lgan sayohatlar
+  const { data: driverTrips, error: err1 } = await supabase
     .from('trips')
     .select('*')
+    .eq('driver_id', userId)
     .order('departure_time', { ascending: false });
 
-  if (driverName) query = query.eq('driver_name', driverName);
-  return await query;
+  if (err1) throw err1;
+
+  // B) Men Yo'lovchi bo'lgan (joy band qilgan) sayohatlar
+  // 1. Avval trip_seats dan men band qilgan trip_id larni olamiz
+  const { data: mySeats, error: err2 } = await supabase
+    .from('trip_seats')
+    .select('trip_id')
+    .eq('holder_client_id', userId); // Men band qilganman
+
+  if (err2) throw err2;
+
+  let passengerTrips = [];
+  if (mySeats && mySeats.length > 0) {
+      // Set orqali unikal ID larni ajratamiz (bitta tripda 2 ta joy olgan bo'lsam ham 1 marta chiqsin)
+      const tripIds = [...new Set(mySeats.map(s => s.trip_id))];
+
+      // 2. O'sha trip_id lar bo'yicha sayohatlarni olib kelamiz
+      const { data: foundTrips, error: err3 } = await supabase
+          .from('trips')
+          .select('*')
+          .in('id', tripIds)
+          .order('departure_time', { ascending: false });
+      
+      if (err3) throw err3;
+      passengerTrips = foundTrips;
+  }
+
+  // C) Ikkala ro'yxatni birlashtiramiz va belgilab qo'yamiz
+  // Frontend bilishi kerak: qaysi birida men haydovchi, qaysi birida yo'lovchi.
+  const result = [
+      ...driverTrips.map(t => ({ ...t, my_role: 'driver' })),
+      ...passengerTrips.map(t => ({ ...t, my_role: 'passenger' }))
+  ];
+
+  // Sanaga qarab saralash (eng yangisi tepada)
+  return result.sort((a, b) => new Date(b.departure_time) - new Date(a.departure_time));
 };
 
 exports.getTripById = async (tripId) => {

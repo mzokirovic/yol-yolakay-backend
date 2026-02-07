@@ -1,5 +1,7 @@
+// src/modules/trips/trips.controller.js
+
 const tripService = require('./trips.service');
-const pricingService = require('./pricing.service'); // ✅ MUHIM IMPORT
+const pricingService = require('./pricing.service');
 const supabase = require('../../core/db/supabase');
 
 // Xavfsiz ID olish
@@ -25,21 +27,14 @@ function parseSeatNo(seatNo) {
 
 // --- CONTROLLER METHODS ---
 
-// ✅ YANGI: Narxni oldindan hisoblash (Preview)
 exports.calculatePricePreview = async (req, res) => {
     try {
         const { fromLat, fromLng, toLat, toLng } = req.body;
-
         if (!fromLat || !toLat) {
             return res.status(400).json({ success: false, message: "Koordinatalar yetarli emas" });
         }
-
-        // 1. Masofa
         const dist = pricingService.calculateDistance(fromLat, fromLng, toLat, toLng);
-
-        // 2. Narx logikasi
         const pricing = pricingService.calculateTripPrice(dist);
-
         return res.status(200).json({ success: true, ...pricing });
     } catch (e) {
         return res.status(500).json({ success: false, error: { message: e.message } });
@@ -48,21 +43,11 @@ exports.calculatePricePreview = async (req, res) => {
 
 exports.getPopularPoints = async (req, res) => {
   try {
-    const { city } = req.query; // ?city=Toshkent (optional)
-
-    let query = supabase
-      .from('popular_points')
-      .select('*')
-      .eq('is_active', true);
-
-    if (city) {
-        query = query.ilike('city_name', `%${city}%`);
-    }
-
+    const { city } = req.query;
+    let query = supabase.from('popular_points').select('*').eq('is_active', true);
+    if (city) query = query.ilike('city_name', `%${city}%`);
     const { data, error } = await query;
-
     if (error) throw error;
-
     return res.status(200).json({ success: true, count: data.length, data });
   } catch (error) {
     console.error("Points Error:", error.message);
@@ -122,10 +107,12 @@ exports.searchTrips = async (req, res) => {
   }
 };
 
+// ✅ YANGI: getMyTrips faqat tokenni tekshiradi
 exports.getMyTrips = async (req, res) => {
   try {
-    const { driverName } = req.query;
-    const list = await tripService.getMyTrips({ driverName });
+    // Endi query.driverName KERAK EMAS
+    const userId = getUserId(req); // Token dan olinadi
+    const list = await tripService.getUserTrips(userId);
     return res.status(200).json({ success: true, count: list.length, data: list });
   } catch (error) {
     return res.status(500).json({ success: false, error: { message: error.message } });
@@ -142,7 +129,7 @@ exports.getTripDetails = async (req, res) => {
   }
 };
 
-// ----------------- SEAT ACTIONS -----------------
+// ... (Qolgan Seat actionlar o'zgarishsiz qoladi)
 
 exports.requestSeat = async (req, res) => {
   try {
@@ -150,13 +137,7 @@ exports.requestSeat = async (req, res) => {
     const { id, seatNo } = req.params;
     const seat = parseSeatNo(seatNo);
     const { holderName } = req.body || {};
-
-    const data = await tripService.requestSeat({
-        tripId: id,
-        seatNo: seat,
-        clientId: userId,
-        holderName
-    });
+    const data = await tripService.requestSeat({ tripId: id, seatNo: seat, clientId: userId, holderName });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
     if (e.code === 'SEAT_NOT_AVAILABLE') return res.status(409).json({ success: false, error: { message: e.message } });
@@ -169,12 +150,7 @@ exports.cancelRequest = async (req, res) => {
     const userId = getUserId(req);
     const { id, seatNo } = req.params;
     const seat = parseSeatNo(seatNo);
-
-    const data = await tripService.cancelRequest({
-        tripId: id,
-        seatNo: seat,
-        clientId: userId
-    });
+    const data = await tripService.cancelRequest({ tripId: id, seatNo: seat, clientId: userId });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
     return res.status(500).json({ success: false, error: { message: e.message } });
@@ -186,12 +162,7 @@ exports.approveSeat = async (req, res) => {
     const userId = getUserId(req);
     const { id, seatNo } = req.params;
     const seat = parseSeatNo(seatNo);
-
-    const data = await tripService.approveSeat({
-        tripId: id,
-        seatNo: seat,
-        driverId: userId
-    });
+    const data = await tripService.approveSeat({ tripId: id, seatNo: seat, driverId: userId });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
     const status = e.code === 'FORBIDDEN' ? 403 : 500;
@@ -204,12 +175,7 @@ exports.rejectSeat = async (req, res) => {
     const userId = getUserId(req);
     const { id, seatNo } = req.params;
     const seat = parseSeatNo(seatNo);
-
-    const data = await tripService.rejectSeat({
-        tripId: id,
-        seatNo: seat,
-        driverId: userId
-    });
+    const data = await tripService.rejectSeat({ tripId: id, seatNo: seat, driverId: userId });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
     const status = e.code === 'FORBIDDEN' ? 403 : 500;
@@ -222,12 +188,7 @@ exports.blockSeat = async (req, res) => {
     const userId = getUserId(req);
     const { id, seatNo } = req.params;
     const seat = parseSeatNo(seatNo);
-
-    const data = await tripService.blockSeat({
-        tripId: id,
-        seatNo: seat,
-        driverId: userId
-    });
+    const data = await tripService.blockSeat({ tripId: id, seatNo: seat, driverId: userId });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
     const status = e.code === 'FORBIDDEN' ? 403 : 500;
@@ -240,12 +201,7 @@ exports.unblockSeat = async (req, res) => {
     const userId = getUserId(req);
     const { id, seatNo } = req.params;
     const seat = parseSeatNo(seatNo);
-
-    const data = await tripService.unblockSeat({
-        tripId: id,
-        seatNo: seat,
-        driverId: userId
-    });
+    const data = await tripService.unblockSeat({ tripId: id, seatNo: seat, driverId: userId });
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
     const status = e.code === 'FORBIDDEN' ? 403 : 500;

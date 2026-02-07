@@ -3,8 +3,7 @@
 const repo = require('./trips.repo');
 const notifRepo = require('../notifications/notifications.repo');
 const pricingService = require('./pricing.service');
-// ❌ Supabase direct access olib tashlandi: const supabase = require('../../core/db/supabase');
-const profileService = require('../profile/profile.service'); // ✅ YANGI: Profile Service orqali ishlash
+const profileService = require('../profile/profile.service');
 const { sendToToken } = require('../../core/fcm');
 
 // --- HELPER FUNCTIONS ---
@@ -45,8 +44,6 @@ async function assertDriver(tripId, driverId) {
 
 // 3. ✅ YANGILANGAN: User va Mashina ma'lumotlarini olish (Clean Architecture)
 async function getDriverInfo(userId) {
-  // DB ga to'g'ridan-to'g'ri murojaat qilish o'rniga Service ishlatamiz.
-  // profile.repo.js ma'lumotlarni camelCase (displayName, phone) formatida qaytaradi.
   const profile = await profileService.getOrCreateProfile(userId);
 
   if (!profile || !profile.phone) {
@@ -59,7 +56,6 @@ async function getDriverInfo(userId) {
     throw new Error("Sizda ro'yxatdan o'tgan mashina yo'q. Avval mashina qo'shing.");
   }
 
-  // Mashina ma'lumotlari to'liqligini tekshirish
   if (!vehicle.model || !vehicle.plate) {
       throw new Error("Mashina ma'lumotlari to'liq emas (Model va Raqam shart).");
   }
@@ -67,42 +63,8 @@ async function getDriverInfo(userId) {
   return { profile, vehicle };
 }
 
-// 4. ✅ YANGI: Lokatsiyani aniqlash (Point ID vs Manual Coords)
+// 4. ✅ YANGI: Lokatsiyani aniqlash
 async function resolveLocation(locationName, pointId, manualLat, manualLng) {
-  // Eslatma: Popular Points uchun alohida Service bo'lmagani uchun,
-  // hozircha bu yerda repo chaqirilishi mumkin edi, lekin
-  // sizda popular_points uchun alohida modul yo'qligi sababli,
-  // bu logikani trips.repo ichiga olish to'g'riroq bo'lardi.
-  // LEKIN, hozir "buzib qo'ymaslik" uchun eski logikani saqlab qolamiz,
-  // faqat bu funksiya o'zi supabase ishlatmasligi kerak.
-
-  // Hozircha bu qismni o'zgartirmaymiz, chunki popular_points
-  // sizda alohida modul sifatida ko'rsatilmagan.
-  // Agar popular_points trips repo ichida bo'lsa, repodan chaqirish kerak.
-  // Keling, xavfsizlik uchun buni oddiy qoldiramiz,
-  // chunki asosiy muammo Profile bilan bog'liq edi.
-
-  // *Izoh: Agar kelajakda PopularPoints alohida modul bo'lsa, buni ham o'sha yerdan olasiz.*
-
-  // Hozirgi kodda supabase variable o'chirilganligi sababli,
-  // bu yerda bizga trips.repo da yordamchi funksiya kerak bo'ladi
-  // YOKI biz bu yerda supabase ni ishlatmaymiz, manual data qaytaramiz (MVP).
-
-  // Kuting, tepadagi `const supabase` ni o'chirdik.
-  // Demak `resolveLocation` sinadi agar biz popular_points ni DB dan olsak.
-
-  // FIX: `resolveLocation` endi DB ga murojaat qilmasligi kerak,
-  // chunki Service DB ga kirmasligi kerak.
-  // PointID bo'lsa, demak klient bizga allaqachon nom va koordinatani berishi kerak edi.
-  // Yoki biz buni Repoga yuklaymiz.
-
-  // YECHIM: `trips.repo.js` da `getPopularPointById` degan funksiya bor deb faraz qilamiz
-  // yoki shunchaki klient yuborgan dataga ishonamiz.
-
-  // Hozirgi vaziyatda eng xavfsiz yo'l:
-  // Klient yuborgan `data.fromLocation`, `data.fromLat` larga ishonish.
-  // Backend DB dan qayta tekshirishi shart emas (MVP uchun).
-
   return {
       name: locationName || "Noma'lum joy",
       lat: Number(manualLat) || 0.0,
@@ -114,20 +76,16 @@ async function resolveLocation(locationName, pointId, manualLat, manualLng) {
 // --- MAIN BUSINESS LOGIC ---
 
 exports.createTrip = async (data, userId) => {
-  // 1. Data Integrity: Haydovchi va mashina bormi?
   const { profile, vehicle } = await getDriverInfo(userId);
 
-  // 2. Lokatsiyalarni aniqlash
   const fromLoc = await resolveLocation(data.fromLocation, data.fromPointId, data.fromLat, data.fromLng);
   const toLoc = await resolveLocation(data.toLocation, data.toPointId, data.toLat, data.toLng);
 
-  // 3. Sana va Vaqt validatsiyasi
   const departureTime = `${data.date}T${data.time}:00+05:00`;
   if (new Date(departureTime) < new Date()) {
       throw new Error("O'tib ketgan vaqtga e'lon berib bo'lmaydi.");
   }
 
-  // 4. Narx Validatsiyasi (Smart Pricing)
   const distance = pricingService.calculateDistance(fromLoc.lat, fromLoc.lng, toLoc.lat, toLoc.lng);
   const priceCalc = pricingService.calculateTripPrice(distance);
 
@@ -136,21 +94,15 @@ exports.createTrip = async (data, userId) => {
       throw new Error(priceCheck.message);
   }
 
-  // 5. Seats check
   const seatsNum = parseInt(data.seats, 10);
   if (Number.isNaN(seatsNum) || seatsNum < 1 || seatsNum > 4) {
     throw new Error("Seats 1..4 oralig'ida bo'lishi kerak");
   }
 
-  // 6. DB Payload (Real data bilan)
   const dbPayload = {
     driver_id: userId,
-
-    // 🚨 TUZATILDI: ProfileService camelCase qaytaradi
-    driver_name: profile.displayName, // 👈 display_name EMAS
-    phone_number: profile.phone,      // phone o'zgarmagan
-
-    // Vehicle fieldlari repo.js da make, model, color deb map qilingan
+    driver_name: profile.displayName,
+    phone_number: profile.phone,
     car_model: `${vehicle.make} ${vehicle.model} (${vehicle.color})`,
 
     from_city: fromLoc.name,
@@ -180,7 +132,6 @@ exports.createTrip = async (data, userId) => {
   const { error: e2 } = await repo.recalcTripAvailableSeats(newTrip.id);
   if (e2) throw e2;
 
-  // Frontga qo'shimcha info qaytaramiz
   newTrip.is_price_low = priceCheck.isLow;
   newTrip.recommended_price = priceCalc.recommended;
 
@@ -193,10 +144,10 @@ exports.searchTrips = async ({ from, to, date, passengers }) => {
   return data;
 };
 
-exports.getMyTrips = async ({ driverName }) => {
-  const { data, error } = await repo.getMyTrips({ driverName });
-  if (error) throw error;
-  return data;
+// ✅ YANGI: ID orqali olish
+exports.getUserTrips = async (userId) => {
+  // Endi Repo driverName ni emas, ID ni ishlatadi
+  return await repo.getUserTrips(userId);
 };
 
 exports.getTripDetails = async (tripId) => {
@@ -207,7 +158,7 @@ exports.getTripDetails = async (tripId) => {
   return { trip, seats };
 };
 
-// --- SEAT REQUEST FLOW (Notification logic retained) ---
+// --- SEAT ACTIONS ---
 
 exports.requestSeat = async ({ tripId, seatNo, clientId, holderName }) => {
   const { data: updated, error } = await repo.requestSeat({ tripId, seatNo, clientId, holderName });
@@ -274,8 +225,6 @@ exports.rejectSeat = async ({ tripId, seatNo, driverId }) => {
   }
   return await exports.getTripDetails(tripId);
 };
-
-// --- DRIVER BLOCK/UNBLOCK ---
 
 exports.blockSeat = async ({ tripId, seatNo, driverId }) => {
   await assertDriver(tripId, driverId);
