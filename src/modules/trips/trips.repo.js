@@ -2,194 +2,190 @@
 
 const supabase = require('../../core/db/supabase');
 
-function nextDateISO(dateStr /* YYYY-MM-DD */) {
+// --- Yordamchi funksiya: Keyingi kun sanasi ---
+function nextDateISO(dateStr) {
   const d = new Date(`${dateStr}T00:00:00Z`);
   d.setUTCDate(d.getUTCDate() + 1);
   return d.toISOString().slice(0, 10);
 }
 
-function shuffle(arr) {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
+// ----------------------------------------------------
+// 1. TRIPS (Sayohatlar) CRUD
+// ----------------------------------------------------
 
-// ---------- TRIPS ----------
-exports.insertTrip = async (dbPayload) => {
-  return await supabase
+// Yangi sayohat qo'shish
+exports.insertTrip = async (payload) => {
+  const { data, error } = await supabase
     .from('trips')
-    .insert([dbPayload])
+    .insert([payload])
     .select()
     .single();
+  return { data, error };
 };
 
+// ID orqali olish (Haydovchi profili bilan birga)
+exports.getTripById = async (id) => {
+  const { data, error } = await supabase
+    .from('trips')
+    .select('*, driver:profiles(*)') // Haydovchi ma'lumotlarini ulaymiz
+    .eq('id', id)
+    .single();
+  return { data, error };
+};
+
+// Qidiruv (Search)
 exports.searchTrips = async ({ from, to, date, passengers }) => {
   let query = supabase
     .from('trips')
     .select('*')
-    .eq('status', 'active')
-    .order('departure_time', { ascending: true });
+    .eq('status', 'active') // Faqat aktivlari
+    .order('departure_time', { ascending: true }); // Vaqt bo'yicha
 
   if (from) query = query.ilike('from_city', `%${from}%`);
   if (to) query = query.ilike('to_city', `%${to}%`);
 
-  const p = passengers != null ? parseInt(passengers, 10) : null;
-  if (p && !Number.isNaN(p)) query = query.gte('available_seats', p);
+  const p = passengers ? parseInt(passengers, 10) : 0;
+  if (p > 0) query = query.gte('available_seats', p);
 
+  // Sana bo'yicha filter
   if (date) {
     const start = `${date}T00:00:00+05:00`;
     const end = `${nextDateISO(date)}T00:00:00+05:00`;
     query = query.gte('departure_time', start).lt('departure_time', end);
   }
 
-  return await query;
+  const { data, error } = await query;
+  return { data, error };
 };
 
-// ✅ YANGI: User ID bo'yicha Haydovchi va Yo'lovchi e'lonlarini olish
+// Mening sayohatlarim (Haydovchi va Yo'lovchi sifatida)
 exports.getUserTrips = async (userId) => {
-  // A) Men Haydovchi bo'lgan sayohatlar
+  // A) Men Haydovchi bo'lganlar
   const { data: driverTrips, error: err1 } = await supabase
     .from('trips')
     .select('*')
     .eq('driver_id', userId)
     .order('departure_time', { ascending: false });
 
-  if (err1) throw err1;
+  if (err1) return { error: err1 };
 
-  // B) Men Yo'lovchi bo'lgan (joy band qilgan) sayohatlar
-  // 1. Avval trip_seats dan men band qilgan trip_id larni olamiz
+  // B) Men Yo'lovchi bo'lganlar (joy band qilganlarim)
   const { data: mySeats, error: err2 } = await supabase
     .from('trip_seats')
     .select('trip_id')
-    .eq('holder_client_id', userId); // Men band qilganman
+    .eq('holder_client_id', userId);
 
-  if (err2) throw err2;
+  if (err2) return { error: err2 };
 
   let passengerTrips = [];
   if (mySeats && mySeats.length > 0) {
-      // Set orqali unikal ID larni ajratamiz (bitta tripda 2 ta joy olgan bo'lsam ham 1 marta chiqsin)
-      const tripIds = [...new Set(mySeats.map(s => s.trip_id))];
-
-      // 2. O'sha trip_id lar bo'yicha sayohatlarni olib kelamiz
-      const { data: foundTrips, error: err3 } = await supabase
+      const uniqueTripIds = [...new Set(mySeats.map(s => s.trip_id))];
+      const { data: found, error: err3 } = await supabase
           .from('trips')
           .select('*')
-          .in('id', tripIds)
+          .in('id', uniqueTripIds)
           .order('departure_time', { ascending: false });
-      
-      if (err3) throw err3;
-      passengerTrips = foundTrips;
+
+      if (err3) return { error: err3 };
+      passengerTrips = found;
   }
 
-  // C) Ikkala ro'yxatni birlashtiramiz va belgilab qo'yamiz
-  // Frontend bilishi kerak: qaysi birida men haydovchi, qaysi birida yo'lovchi.
+  // Birlashtiramiz va belgilaymiz
   const result = [
       ...driverTrips.map(t => ({ ...t, my_role: 'driver' })),
       ...passengerTrips.map(t => ({ ...t, my_role: 'passenger' }))
   ];
 
-  // Sanaga qarab saralash (eng yangisi tepada)
-  return result.sort((a, b) => new Date(b.departure_time) - new Date(a.departure_time));
+  // Saralash (Eng yangisi tepada)
+  const sorted = result.sort((a, b) => new Date(b.departure_time) - new Date(a.departure_time));
+  return { data: sorted };
 };
 
-exports.getTripById = async (tripId) => {
-  return await supabase
-    .from('trips')
-    .select('*')
-    .eq('id', tripId)
-    .single();
-};
+// ----------------------------------------------------
+// 2. SEATS (O'rindiqlar) MANAGEMENT
+// ----------------------------------------------------
 
-exports.updateTripAvailableSeats = async (tripId, availableSeats) => {
-  return await supabase
-    .from('trips')
-    .update({ available_seats: availableSeats })
-    .eq('id', tripId)
-    .select('available_seats')
-    .single();
-};
-
-// ---------- SEATS ----------
 exports.getTripSeats = async (tripId) => {
-  return await supabase
+  const { data, error } = await supabase
     .from('trip_seats')
     .select('*')
     .eq('trip_id', tripId)
     .order('seat_no', { ascending: true });
+  return { data, error };
 };
 
-// ✅ Trip yaratilganda: 4 ta seat bo‘ladi,
-// seatsOffered ta seat RANDOM available, qolganlari blocked (system-closed: locked_by_driver=false)
-exports.initTripSeats = async (tripId, seatsOffered) => {
-  const all = [1, 2, 3, 4];
-  const open = new Set(shuffle(all).slice(0, seatsOffered));
-
-  const rows = all.map((n) => ({
-    trip_id: tripId,
-    seat_no: n,
-    status: open.has(n) ? 'available' : 'blocked',
-    locked_by_driver: false, // system-closed
-    holder_name: null,
-    holder_client_id: null,
-  }));
-
-  return await supabase.from('trip_seats').insert(rows);
+// Trip yaratilganda o'rindiqlarni boshlang'ich holatga keltirish
+exports.initTripSeats = async (tripId, seatsCount) => {
+  const seats = [];
+  // Har doim 4 ta o'rindiq yaratamiz
+  for (let i = 1; i <= 4; i++) {
+    // Agar haydovchi 3 ta joy bor desa, 4-o'rindiq 'blocked' bo'ladi
+    const status = i <= seatsCount ? 'available' : 'blocked';
+    seats.push({
+      trip_id: tripId,
+      seat_no: i,
+      status: status,
+      locked_by_driver: false
+    });
+  }
+  const { error } = await supabase.from('trip_seats').insert(seats);
+  if (error) console.error("Init seats error:", error);
 };
 
-// ✅ available seatlar sonini seat table’dan hisoblaymiz
+// Available joylarni qayta hisoblash va Trips jadvaliga yozish
 exports.recalcTripAvailableSeats = async (tripId) => {
-  const { data, error } = await supabase
+  // 1. Sanash
+  const { count, error } = await supabase
     .from('trip_seats')
-    .select('id', { count: 'exact', head: true })
+    .select('*', { count: 'exact', head: true })
     .eq('trip_id', tripId)
     .eq('status', 'available');
 
-  if (error) return { data: null, error };
-  const count = data?.length ? data.length : 0; // head:true bo‘lsa length 0 bo‘lishi mumkin
-
-  // Supabase head:true bilan count alohida qaytadi, lekin clientlarda farq bo‘lishi mumkin.
-  // Shuning uchun count’ni xavfsiz olish:
-  const availableSeats = (typeof data === 'object' && data !== null && 'count' in data)
-    ? data.count
-    : undefined;
-
-  // Agar count kelmasa, fallback: yana bir marta oddiy select qilib sanaymiz
-  if (availableSeats == null) {
-    const r = await supabase
-      .from('trip_seats')
-      .select('id')
-      .eq('trip_id', tripId)
-      .eq('status', 'available');
-    if (r.error) return { data: null, error: r.error };
-    const c = (r.data || []).length;
-    return await exports.updateTripAvailableSeats(tripId, c);
+  if (!error) {
+    // 2. Yangilash
+    await supabase
+      .from('trips')
+      .update({ available_seats: count })
+      .eq('id', tripId);
   }
-
-  return await exports.updateTripAvailableSeats(tripId, availableSeats);
+  return { error };
 };
 
-// Passenger: available -> pending (atomik)
-exports.requestSeat = async ({ tripId, seatNo, holderName, clientId }) => {
-  return await supabase
+// ----------------------------------------------------
+// 3. SEAT ACTIONS (Band qilish, Bekor qilish...)
+// ----------------------------------------------------
+
+// Yo'lovchi: Joy so'rash
+exports.requestSeat = async ({ tripId, seatNo, clientId, holderName }) => {
+  const { data, error } = await supabase
     .from('trip_seats')
     .update({
-      status: 'pending',
-      holder_name: holderName ?? 'Passenger',
-      holder_client_id: clientId,
+        status: 'pending',
+        holder_client_id: clientId,
+        holder_name: holderName || 'Yo\'lovchi'
     })
     .eq('trip_id', tripId)
     .eq('seat_no', seatNo)
-    .eq('status', 'available')
+    .eq('status', 'available') // Optimistic Lock (Faqat bo'sh bo'lsa)
     .select()
     .maybeSingle();
+  return { data, error };
 };
 
-// Driver: pending -> booked (atomik)
+// Yo'lovchi: So'rovni bekor qilish
+exports.cancelRequest = async ({ tripId, seatNo, clientId }) => {
+  const { data, error } = await supabase
+    .from('trip_seats')
+    .update({ status: 'available', holder_client_id: null, holder_name: null })
+    .eq('trip_id', tripId)
+    .eq('seat_no', seatNo)
+    .eq('holder_client_id', clientId); // Faqat o'zimnikini
+  return { data, error };
+};
+
+// Haydovchi: Qabul qilish
 exports.approveSeat = async ({ tripId, seatNo }) => {
-  return await supabase
+  const { data, error } = await supabase
     .from('trip_seats')
     .update({ status: 'booked' })
     .eq('trip_id', tripId)
@@ -197,44 +193,24 @@ exports.approveSeat = async ({ tripId, seatNo }) => {
     .eq('status', 'pending')
     .select()
     .maybeSingle();
+  return { data, error };
 };
 
-// Driver: pending -> available (atomik) + holder null
+// Haydovchi: Rad etish
 exports.rejectSeat = async ({ tripId, seatNo }) => {
-  return await supabase
+  const { data, error } = await supabase
     .from('trip_seats')
-    .update({
-      status: 'available',
-      holder_name: null,
-      holder_client_id: null,
-    })
+    .update({ status: 'available', holder_client_id: null, holder_name: null })
     .eq('trip_id', tripId)
     .eq('seat_no', seatNo)
-    .eq('status', 'pending')
     .select()
     .maybeSingle();
+  return { error };
 };
 
-// Passenger: pending(mine) -> available (atomik)
-exports.cancelRequest = async ({ tripId, seatNo, clientId }) => {
-  return await supabase
-    .from('trip_seats')
-    .update({
-      status: 'available',
-      holder_name: null,
-      holder_client_id: null,
-    })
-    .eq('trip_id', tripId)
-    .eq('seat_no', seatNo)
-    .eq('status', 'pending')
-    .eq('holder_client_id', clientId)
-    .select()
-    .maybeSingle();
-};
-
-// Driver: available -> blocked (atomik, locked_by_driver=true)
+// Haydovchi: Joyni yopish (Block)
 exports.blockSeatByDriver = async ({ tripId, seatNo }) => {
-  return await supabase
+  const { data, error } = await supabase
     .from('trip_seats')
     .update({ status: 'blocked', locked_by_driver: true })
     .eq('trip_id', tripId)
@@ -242,11 +218,12 @@ exports.blockSeatByDriver = async ({ tripId, seatNo }) => {
     .eq('status', 'available')
     .select()
     .maybeSingle();
+  return { data, error };
 };
 
-// Driver: blocked(driver) -> available
+// Haydovchi: Joyni ochish (Unblock)
 exports.unblockSeatByDriver = async ({ tripId, seatNo }) => {
-  return await supabase
+  const { data, error } = await supabase
     .from('trip_seats')
     .update({ status: 'available', locked_by_driver: false })
     .eq('trip_id', tripId)
@@ -254,4 +231,5 @@ exports.unblockSeatByDriver = async ({ tripId, seatNo }) => {
     .eq('status', 'blocked')
     .select()
     .maybeSingle();
+  return { data, error };
 };
