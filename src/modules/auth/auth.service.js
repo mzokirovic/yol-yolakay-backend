@@ -26,29 +26,37 @@ function badRequest(msg) {
   return err;
 }
 
-// ✅ SEND OTP (Majburiy E.164 Formati: +998...)
+// ✅ SEND OTP
 async function sendOtp(phone) {
     if (typeof phone !== 'string') {
         throw new Error("Phone must be a string");
     }
 
-    // 1. TOZALASH: Faqat raqamlarni qoldiramiz
+    console.log(`original phone input: '${phone}'`);
+
+    // 1. TOZALASH: Barcha begona belgilarni olib tashlaymiz
     let cleanPhone = phone.replace(/[^\d]/g, '');
 
-    // 2. FORMATLASH: Boshiga majburan + qo'shamiz
-    // Natija har doim: +998901234567 ko'rinishida bo'ladi
+    // 2. FORMATLASH: Majburan + qo'shamiz
+    // Natija har doim: +998901234567
     const finalPhone = `+${cleanPhone}`;
 
-    console.log(`🚀 Sending OTP via AuthClient to: '${finalPhone}'`);
+    console.log(`🚀 YUBORILAYOTGAN RAQAM (SUPABASEGA): '${finalPhone}'`);
 
     const { data, error } = await authClient.auth.signInWithOtp({
         phone: finalPhone,
     });
 
     if (error) {
-        console.error("🔥 Supabase Auth Error:", error);
+        console.error("🔥 Supabase Auth Error:", error.message);
+        // Agar Twilio xatosi bo'lsa, demak raqam Test ro'yxatida yo'q!
+        if (error.message.includes("Twilio") || error.status === 500) {
+            throw new Error(`CRITICAL: Supabase bu raqamni (${finalPhone}) Test Raqam deb tanimadi! Dashboardni tekshiring.`);
+        }
         throw error;
     }
+
+    console.log("✅ Supabase qabul qildi. SMS yuborilmadi (Test mode).");
     return data;
 }
 
@@ -57,7 +65,7 @@ async function verifyOtp(req) {
   const body = req.body || {};
   let phone = body.phone;
 
-  // Verify qilganda ham formatlaymiz
+  // Verify qilganda ham xuddi shunday formatlaymiz
   if (phone) {
       const clean = phone.replace(/[^\d]/g, '');
       phone = `+${clean}`;
@@ -68,7 +76,7 @@ async function verifyOtp(req) {
   if (!phone) throw badRequest("phone is required");
   if (!code) throw badRequest("code (or token) is required");
 
-  console.log(`🔍 Verifying: ${phone} with code: ${code}`);
+  console.log(`🔍 Verifying: '${phone}' with code: '${code}'`);
 
   const { data, error } = await authClient.auth.verifyOtp({
     phone,
@@ -83,7 +91,6 @@ async function verifyOtp(req) {
 
   if (!user || !session) throw badRequest("Auth verification failed (No session)");
 
-  // Profilni tekshirish
   const { data: profile, error: profileError } = await dbClient
     .from('profiles')
     .select('user_id')
