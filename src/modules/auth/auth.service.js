@@ -26,22 +26,20 @@ function badRequest(msg) {
   return err;
 }
 
-// ✅ SEND OTP
+// ✅ SEND OTP (DIAGNOSTIKA REJIMI)
 async function sendOtp(phone) {
     if (typeof phone !== 'string') {
         throw new Error("Phone must be a string");
     }
 
-    console.log(`original phone input: '${phone}'`);
-
-    // 1. TOZALASH: Barcha begona belgilarni olib tashlaymiz
+    // 1. TOZALASH: Barcha belgilarni olib tashlaymiz
     let cleanPhone = phone.replace(/[^\d]/g, '');
 
     // 2. FORMATLASH: Majburan + qo'shamiz
     // Natija har doim: +998901234567
     const finalPhone = `+${cleanPhone}`;
 
-    console.log(`🚀 YUBORILAYOTGAN RAQAM (SUPABASEGA): '${finalPhone}'`);
+    console.log(`🚀 YUBORILAYOTGAN RAQAM: '${finalPhone}'`);
 
     const { data, error } = await authClient.auth.signInWithOtp({
         phone: finalPhone,
@@ -49,14 +47,12 @@ async function sendOtp(phone) {
 
     if (error) {
         console.error("🔥 Supabase Auth Error:", error.message);
-        // Agar Twilio xatosi bo'lsa, demak raqam Test ro'yxatida yo'q!
-        if (error.message.includes("Twilio") || error.status === 500) {
-            throw new Error(`CRITICAL: Supabase bu raqamni (${finalPhone}) Test Raqam deb tanimadi! Dashboardni tekshiring.`);
-        }
-        throw error;
+
+        // 🔴 MUHIM: Xatolik ichiga YUBORILGAN RAQAMNI qo'shib qaytaramiz
+        // Shunda siz Android ekranida Backend nima yuborganini ko'rasiz
+        throw new Error(`CRITICAL_MISMATCH: Backend Supabasega '${finalPhone}' ni yubordi, lekin Supabase buni Test Raqam deb tanimadi! Dashboardga aynan '${finalPhone}' ni qo'shing.`);
     }
 
-    console.log("✅ Supabase qabul qildi. SMS yuborilmadi (Test mode).");
     return data;
 }
 
@@ -65,7 +61,6 @@ async function verifyOtp(req) {
   const body = req.body || {};
   let phone = body.phone;
 
-  // Verify qilganda ham xuddi shunday formatlaymiz
   if (phone) {
       const clean = phone.replace(/[^\d]/g, '');
       phone = `+${clean}`;
