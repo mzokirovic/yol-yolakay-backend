@@ -26,31 +26,26 @@ function badRequest(msg) {
   return err;
 }
 
-// ✅ SEND OTP (DIAGNOSTIKA REJIMI)
+// ✅ SEND OTP (PLYUSSIZ - Supabase Test Nomerga moslashgan)
 async function sendOtp(phone) {
     if (typeof phone !== 'string') {
         throw new Error("Phone must be a string");
     }
 
-    // 1. TOZALASH: Barcha belgilarni olib tashlaymiz
+    // 1. TOZALASH: Faqat raqamlarni qoldiramiz.
+    // Plyus (+), probel, tire - hammasi ketadi.
+    // Masalan: "+998 90 123" -> "99890123"
     let cleanPhone = phone.replace(/[^\d]/g, '');
 
-    // 2. FORMATLASH: Majburan + qo'shamiz
-    // Natija har doim: +998901234567
-    const finalPhone = `+${cleanPhone}`;
-
-    console.log(`🚀 YUBORILAYOTGAN RAQAM: '${finalPhone}'`);
+    console.log(`🚀 YUBORILAYOTGAN RAQAM (PLYUSSIZ): '${cleanPhone}'`);
 
     const { data, error } = await authClient.auth.signInWithOtp({
-        phone: finalPhone,
+        phone: cleanPhone, // Plyus qo'shmaymiz!
     });
 
     if (error) {
         console.error("🔥 Supabase Auth Error:", error.message);
-
-        // 🔴 MUHIM: Xatolik ichiga YUBORILGAN RAQAMNI qo'shib qaytaramiz
-        // Shunda siz Android ekranida Backend nima yuborganini ko'rasiz
-        throw new Error(`CRITICAL_MISMATCH: Backend Supabasega '${finalPhone}' ni yubordi, lekin Supabase buni Test Raqam deb tanimadi! Dashboardga aynan '${finalPhone}' ni qo'shing.`);
+        throw error;
     }
 
     return data;
@@ -60,13 +55,12 @@ async function sendOtp(phone) {
 async function verifyOtp(req) {
   const body = req.body || {};
   let phone = body.phone;
-
-  if (phone) {
-      const clean = phone.replace(/[^\d]/g, '');
-      phone = `+${clean}`;
-  }
-
   const code = body.code || body.token;
+
+  // Verify paytida ham faqat raqamlarni olamiz
+  if (phone) {
+      phone = phone.replace(/[^\d]/g, '');
+  }
 
   if (!phone) throw badRequest("phone is required");
   if (!code) throw badRequest("code (or token) is required");
