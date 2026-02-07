@@ -2,14 +2,14 @@
 
 require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
-const dbClient = require('../../core/db/supabase'); // Bu DB uchun (Admin)
+const dbClient = require('../../core/db/supabase');
 
-// ✅ MAXSUS AUTH CLIENT (Faqat Auth uchun)
+// Auth Client
 const authUrl = process.env.SUPABASE_URL;
 const authKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
 
 if (!authUrl || !authKey) {
-    throw new Error("AUTH SERVICE ERROR: .env faylida SUPABASE_ANON_KEY yo'q!");
+    throw new Error("AUTH SERVICE ERROR: .env faylida kalitlar yo'q!");
 }
 
 const authClient = createClient(authUrl, authKey, {
@@ -26,25 +26,19 @@ function badRequest(msg) {
   return err;
 }
 
-// ✅ SEND OTP (Tuzatilgan: Raqamni majburiy tozalash)
+// ✅ SEND OTP (O'ZGARDI: Plyusni olib tashlaymiz)
 async function sendOtp(phone) {
     if (typeof phone !== 'string') {
         throw new Error("Phone must be a string");
     }
 
-    // 1. RAQAMNI TOZALASH (Sanitization)
-    // Barcha probel, tire va qavslarni olib tashlaymiz. Faqat raqam va + qolsin.
-    let cleanPhone = phone.replace(/[^\d+]/g, '');
+    // 1. RAQAMNI TOZALASH
+    // Faqat raqamlarni qoldiramiz. Plyus (+), probel, tire - hammasi ketadi.
+    // Masalan: "+998 90 123-45-67" -> "998901234567"
+    let cleanPhone = phone.replace(/[^\d]/g, '');
 
-    // 2. FORMATLASH
-    // Agar + belgisi tushib qolgan bo'lsa, qo'shamiz
-    if (!cleanPhone.startsWith('+')) {
-        cleanPhone = `+${cleanPhone}`;
-    }
+    console.log(`🚀 Sending OTP via AuthClient to: '${cleanPhone}' (No Plus)`);
 
-    console.log(`🚀 Sending OTP via AuthClient to: '${cleanPhone}' (Original: '${phone}')`);
-
-    // 3. YUBORISH
     const { data, error } = await authClient.auth.signInWithOtp({
         phone: cleanPhone,
     });
@@ -56,15 +50,14 @@ async function sendOtp(phone) {
     return data;
 }
 
-// ✅ VERIFY OTP
+// ✅ VERIFY OTP (Bu yerda ham plyussiz tekshiramiz)
 async function verifyOtp(req) {
   const body = req.body || {};
-
-  // Raqamni bu yerda ham tozalaymiz
   let phone = body.phone;
+
+  // Verify qilganda ham plyusni olib tashlaymiz
   if (phone) {
-      phone = phone.replace(/[^\d+]/g, '');
-      if (!phone.startsWith('+')) phone = `+${phone}`;
+      phone = phone.replace(/[^\d]/g, '');
   }
 
   const code = body.code || body.token;
@@ -74,7 +67,6 @@ async function verifyOtp(req) {
 
   console.log(`🔍 Verifying: ${phone} with code: ${code}`);
 
-  // 1. Verify
   const { data, error } = await authClient.auth.verifyOtp({
     phone,
     token: code,
@@ -88,7 +80,7 @@ async function verifyOtp(req) {
 
   if (!user || !session) throw badRequest("Auth verification failed (No session)");
 
-  // 2. Profilni tekshirish
+  // Profilni tekshirish
   const { data: profile, error: profileError } = await dbClient
     .from('profiles')
     .select('user_id')
