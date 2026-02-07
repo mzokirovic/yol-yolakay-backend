@@ -1,5 +1,6 @@
 const tripService = require('./trips.service');
-const supabase = require('../../core/db/supabase'); // ✅ Supabase ulash shart
+const pricingService = require('./pricing.service'); // ✅ MUHIM IMPORT
+const supabase = require('../../core/db/supabase');
 
 // Xavfsiz ID olish
 function getUserId(req) {
@@ -24,7 +25,27 @@ function parseSeatNo(seatNo) {
 
 // --- CONTROLLER METHODS ---
 
-// ✅ YANGI: Pitaklarni olish
+// ✅ YANGI: Narxni oldindan hisoblash (Preview)
+exports.calculatePricePreview = async (req, res) => {
+    try {
+        const { fromLat, fromLng, toLat, toLng } = req.body;
+
+        if (!fromLat || !toLat) {
+            return res.status(400).json({ success: false, message: "Koordinatalar yetarli emas" });
+        }
+
+        // 1. Masofa
+        const dist = pricingService.calculateDistance(fromLat, fromLng, toLat, toLng);
+
+        // 2. Narx logikasi
+        const pricing = pricingService.calculateTripPrice(dist);
+
+        return res.status(200).json({ success: true, ...pricing });
+    } catch (e) {
+        return res.status(500).json({ success: false, error: { message: e.message } });
+    }
+};
+
 exports.getPopularPoints = async (req, res) => {
   try {
     const { city } = req.query; // ?city=Toshkent (optional)
@@ -35,7 +56,6 @@ exports.getPopularPoints = async (req, res) => {
       .eq('is_active', true);
 
     if (city) {
-        // Katta-kichik harfni inobatga olmay qidirish (ilike)
         query = query.ilike('city_name', `%${city}%`);
     }
 
@@ -52,30 +72,24 @@ exports.getPopularPoints = async (req, res) => {
 
 exports.publishTrip = async (req, res) => {
   try {
-    // 1. SECURITY: Driver ID faqat tokendan
     const userId = getUserId(req);
     const b = req.body || {};
 
-    // 2. Data Mapping
     const tripData = {
       fromLocation: b.fromLocation ?? b.from_city,
       toLocation: b.toLocation ?? b.to_city,
-      // Yangi: Point ID (agar bo'lsa)
       fromPointId: b.fromPointId || null,
       toPointId: b.toPointId || null,
-      // Koordinatalar
       fromLat: b.fromLat ?? b.start_lat,
       fromLng: b.fromLng ?? b.start_lng,
       toLat: b.toLat ?? b.end_lat,
       toLng: b.toLng ?? b.end_lng,
-      // Vaqt va narx
       date: b.date,
       time: b.time,
       price: parseFloat(b.price),
       seats: parseInt(b.seats ?? b.available_seats, 10),
     };
 
-    // 3. Simple Validation
     if (!tripData.fromLocation || !tripData.toLocation) {
       return res.status(400).json({ success: false, error: { message: "Manzillar kiritilmadi" } });
     }
@@ -83,10 +97,8 @@ exports.publishTrip = async (req, res) => {
        return res.status(400).json({ success: false, error: { message: "Narx va o'rindiq soni kerak" } });
     }
 
-    // 4. Call Service
     const newTrip = await tripService.createTrip(tripData, userId);
 
-    // 5. Success
     return res.status(201).json({
       success: true,
       message: "Safar muvaffaqiyatli e'lon qilindi!",
@@ -130,7 +142,7 @@ exports.getTripDetails = async (req, res) => {
   }
 };
 
-// ----------------- SEAT ACTIONS (To'liq Versiya) -----------------
+// ----------------- SEAT ACTIONS -----------------
 
 exports.requestSeat = async (req, res) => {
   try {

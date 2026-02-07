@@ -2,6 +2,8 @@ const express = require('express');
 const router = express.Router();
 const controller = require('./trips.controller');
 
+router.post('/calculate-price', controller.calculatePricePreview);
+
 router.post('/publish', controller.publishTrip);
 router.get('/search', controller.searchTrips);
 router.get('/my', controller.getMyTrips);
