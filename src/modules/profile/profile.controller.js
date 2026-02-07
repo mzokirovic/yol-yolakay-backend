@@ -4,22 +4,18 @@ const service = require('./profile.service');
 const supabase = require('../../core/db/supabase');
 
 function getUserId(req) {
-  // 1) Token (Eng ishonchli)
+  // 1) Token
   const tokenUserId = req.user?.id;
-
-  // 2) Header (Android ilovadan keladigan)
+  // 2) Header
   const headerUserId = req.headers['x-user-id'];
-
-  // 3) Device ID (Mehmonlar uchun)
+  // 3) Device ID
   const deviceId = req.headers['x-device-id'];
-
-  // 🚨 O'ZGARISH: Query param (req.query.userId) O'CHIRILDI. Bu xavfli edi.
 
   const userId = tokenUserId || headerUserId || deviceId;
 
   if (!userId) {
     const err = new Error("Siz tizimga kirmagansiz (User ID topilmadi)");
-    err.status = 401; // 400 emas, 401 (Unauthorized)
+    err.status = 401;
     throw err;
   }
   return String(userId);
@@ -82,6 +78,7 @@ exports.upsertMyVehicle = async (req, res, next) => {
   }
 };
 
+// ✅ Logdagi xatoni oldini olish uchun bu funksiya aniq bo'lishi shart
 exports.getCarReference = async (req, res, next) => {
   try {
     const { data, error } = await supabase
@@ -95,4 +92,38 @@ exports.getCarReference = async (req, res, next) => {
     console.error("Car Ref Error:", error.message);
     return res.status(500).json({ success: false, error: { message: error.message } });
   }
+};
+
+// ✅ POST /vehicle marshruti uchun funksiya
+exports.upsertVehicleDirect = async (req, res, next) => {
+    try {
+        const userId = getUserId(req);
+        const b = req.body;
+
+        // Validatsiya
+        if (!b.make || !b.model || !b.plate) {
+            return res.status(400).json({ success: false, error: { message: "Mashina ma'lumotlari to'liq emas" } });
+        }
+
+        const vehicleData = {
+            user_id: userId,
+            make: b.make,
+            model: b.model,
+            color: b.color,
+            plate: b.plate,
+            seats: parseInt(b.seats || 4)
+        };
+
+        const { data, error } = await supabase
+            .from('vehicles')
+            .upsert(vehicleData)
+            .select()
+            .single();
+
+        if (error) throw error;
+
+        return res.status(200).json({ success: true, message: "Mashina saqlandi", data });
+    } catch (error) {
+        next(error);
+    }
 };
