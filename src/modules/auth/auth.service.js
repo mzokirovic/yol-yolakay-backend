@@ -1,4 +1,26 @@
-const supabase = require('../../core/db/supabase');
+// /home/mzokirovic/Desktop/yol-yolakay-backend/src/modules/auth/auth.service.js
+
+require('dotenv').config();
+const { createClient } = require('@supabase/supabase-js');
+const dbClient = require('../../core/db/supabase'); // Bu DB uchun (Admin)
+
+// ✅ MAXSUS AUTH CLIENT (Faqat Auth uchun)
+// Bizga "Anon Key" kerak, chunki signInWithOtp foydalanuvchi nomidan bajariladi.
+const authUrl = process.env.SUPABASE_URL;
+const authKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+
+if (!authUrl || !authKey) {
+    throw new Error("AUTH SERVICE ERROR: .env faylida SUPABASE_ANON_KEY yo'q!");
+}
+
+// Auth uchun alohida sozlamalar bilan klient
+const authClient = createClient(authUrl, authKey, {
+    auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        detectSessionInUrl: false
+    }
+});
 
 function badRequest(msg) {
   const err = new Error(msg);
@@ -6,30 +28,43 @@ function badRequest(msg) {
   return err;
 }
 
-// ✅ sendOtp: Faqat telefon raqam stringini qabul qiladi
+// ✅ SEND OTP
 async function sendOtp(phone) {
-    // Phone string ekanligiga ishonch hosil qilish
     if (typeof phone !== 'string') {
-        throw new Error("Service sendOtp expects a string phone number");
+        throw new Error("Phone must be a string");
     }
 
-    const { data, error } = await supabase.auth.signInWithOtp({
-        phone: phone
+    console.log("🚀 Sending OTP via AuthClient to:", phone);
+
+    // AuthClient orqali yuboramiz (Admin orqali emas!)
+    const { data, error } = await authClient.auth.signInWithOtp({
+        phone: phone,
+        // Agar Test Nomer bo'lsa, options shart emas.
+        // Agar real bo'lsa, bu yerda captcha options bo'lishi mumkin.
     });
 
-    if (error) throw error;
+    if (error) {
+        console.error("🔥 Supabase Auth Error:", error);
+        throw error;
+    }
     return data;
 }
 
-// ✅ verifyOtp: Hozircha req qabul qilyapti (Controllerdan kelayotgan)
+// ✅ VERIFY OTP
 async function verifyOtp(req) {
-  const { phone, code } = req.body || {};
+  // Android "token" yuborishi mumkin, Controller "code" deb o'ylashi mumkin.
+  // Ikkalasini ham tekshiramiz.
+  const body = req.body || {};
+  const phone = body.phone;
+  const code = body.code || body.token; // Universal yechim
 
   if (!phone) throw badRequest("phone is required");
-  if (!code) throw badRequest("code is required");
+  if (!code) throw badRequest("code (or token) is required");
 
-  // 1. Supabase Auth Verify
-  const { data, error } = await supabase.auth.verifyOtp({
+  console.log(`🔍 Verifying: ${phone} with code: ${code}`);
+
+  // 1. Verify
+  const { data, error } = await authClient.auth.verifyOtp({
     phone,
     token: code,
     type: 'sms',
@@ -40,15 +75,16 @@ async function verifyOtp(req) {
   const user = data.user;
   const session = data.session;
 
-  if (!user || !session) throw badRequest("Auth failed");
+  if (!user || !session) throw badRequest("Auth verification failed (No session)");
 
-  // 2. Profil borligini tekshirish
-  const { data: profile, error: profileError } = await supabase
+  // 2. Profilni tekshirish (Endi DB Client ishlatamiz, chunki u Admin)
+  const { data: profile, error: profileError } = await dbClient
     .from('profiles')
     .select('user_id')
     .eq('user_id', user.id)
     .single();
 
+  // Agar profil bo'lmasa -> Yangi User
   const isNewUser = !profile;
 
   return {
