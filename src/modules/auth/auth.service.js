@@ -5,7 +5,7 @@ const { createClient } = require('@supabase/supabase-js');
 const dbClient = require('../../core/db/supabase');
 
 const authUrl = process.env.SUPABASE_URL;
-const authKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
+const authKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
 
 if (!authUrl || !authKey) throw new Error("AUTH SERVICE ERROR: Key not found");
 
