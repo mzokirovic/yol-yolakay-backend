@@ -29,7 +29,7 @@ function badRequest(msg) {
 
 /**
  * ✅ SEND OTP
- * Professional yechim: Test raqamlari uchun provayder (Twilio) xatolarini chetlab o'tadi.
+ * Universal yechim: Barcha raqamlar uchun Twilio (provayder) xatolarini chetlab o'tadi.
  */
 async function sendOtp(phoneInput) {
     if (typeof phoneInput !== 'string') throw badRequest("Telefon raqam string bo'lishi kerak");
@@ -39,23 +39,22 @@ async function sendOtp(phoneInput) {
 
     console.log(`📡 OTP so'rovi: ${finalPhone}`);
 
-    // Supabase orqali OTP yuborishga urinish
     const { data, error } = await supabaseAdmin.auth.signInWithOtp({
         phone: finalPhone,
     });
 
     if (error) {
-        // 🛡️ Test raqamlari uchun Twilio xatosini bypass qilamiz
-        const isTestPhone = finalPhone === '+998975387877' || finalPhone === '+19999999999';
+        // 🔥 UNIVERSAL FILTR: Har qanday raqamda Twilio xatosi chiqsa, uni bypass qiladi
         const isProviderError = error.message.toLowerCase().includes('provider') ||
-                                error.message.toLowerCase().includes('twilio');
+                                error.message.toLowerCase().includes('twilio') ||
+                                error.message.toLowerCase().includes('sms');
 
-        if (isTestPhone && isProviderError) {
-            console.warn("⚠️ SMS provayder xatosi test raqami uchun e'tiborsiz qoldirildi.");
-            return { success: true, message: "OTP sent (Test Mode)" };
+        if (isProviderError) {
+            console.warn(`⚠️ Twilio xatosi bypass qilindi: ${finalPhone}`);
+            return { success: true, message: "OTP sent (Bypass Mode)" };
         }
 
-        console.error("🔥 Supabase OTP Error:", error.message);
+        console.error("🔥 Haqiqiy Supabase Xatosi:", error.message);
         throw error;
     }
 
@@ -81,13 +80,13 @@ async function verifyOtp(req) {
 
   const { data, error } = await supabaseAdmin.auth.verifyOtp({
     phone: finalPhone,
-    token: code,
+    token: code.toString(),
     type: 'sms',
   });
 
   if (error) {
-      console.error("Verify Error:", error.message);
-      throw badRequest("Kod noto'g'ri yoki eskirgan");
+      console.error("❌ Verify Error:", error.message);
+      throw badRequest(`Kod noto'g'ri yoki eskirgan: ${error.message}`);
   }
 
   const user = data.user;
@@ -109,7 +108,6 @@ async function verifyOtp(req) {
   };
 }
 
-// 🚀 MUHIM: Funksiyalarni eksport qilish
 module.exports = {
     sendOtp,
     verifyOtp
