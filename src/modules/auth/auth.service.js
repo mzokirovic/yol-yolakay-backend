@@ -4,21 +4,13 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const dbClient = require('../../core/db/supabase');
 
-// 1. URL va KEY borligini tekshiramiz
 const authUrl = process.env.SUPABASE_URL;
 const authKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
 
-if (!authUrl || !authKey) {
-    throw new Error("KRITIK XATO: .env faylida SUPABASE_URL yoki KEY yo'q!");
-}
+if (!authUrl || !authKey) throw new Error("AUTH SERVICE ERROR: Key not found");
 
-// 2. Auth Client yaratamiz
 const authClient = createClient(authUrl, authKey, {
-    auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-        detectSessionInUrl: false
-    }
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false }
 });
 
 function badRequest(msg) {
@@ -27,34 +19,33 @@ function badRequest(msg) {
   return err;
 }
 
-// ✅ SEND OTP (Mantiq: Tozalash -> Plyuslash -> Yuborish)
+// ✅ SEND OTP (Real User yaratish uchun)
 async function sendOtp(phone) {
-    if (typeof phone !== 'string') {
-        throw new Error("Phone must be a string");
-    }
+    if (typeof phone !== 'string') throw new Error("Phone must be a string");
 
-    console.log(`📡 Ilovadan keldi: '${phone}'`);
-
-    // A) TOZALASH: Faqat raqamlarni qoldiramiz
+    // 1. TOZALASH: Har qanday belgini (probel, tire, plyus) olib tashlaymiz
+    // Masalan: "1 (555) 123-4567" -> "15551234567"
     let cleanPhone = phone.replace(/[^\d]/g, '');
 
-    // B) FORMATLASH: Har doim boshiga + qo'shamiz
-    // Supabase bazasida raqamlar + bilan saqlanadi (garchi UI da ko'rinmasa ham)
+    // 2. FORMATLASH: Majburan boshiga + qo'shamiz
+    // Natija: "+15551234567" (Bu Supabase kutayotgan format)
     const finalPhone = `+${cleanPhone}`;
 
     console.log(`🚀 Supabasega yuborilyapti: '${finalPhone}'`);
 
+    // 3. SO'ROV YUBORISH
+    // Supabase bu raqamni "Test Numbers" dan topsa, Twilio ishlatmaydi.
+    // Lekin Userni "auth.users" jadvaliga qo'shadi (agar yo'q bo'lsa).
     const { data, error } = await authClient.auth.signInWithOtp({
         phone: finalPhone,
     });
 
     if (error) {
-        console.error("🔥 Supabase Xatosi:", error.message);
-        console.error("💡 Maslahat: Agar 'Twilio' xatosi chiqsa, demak Supabase Dashboardda bu raqam TEST ro'yxatida yo'q!");
+        console.error("🔥 XATO:", error.message);
         throw error;
     }
 
-    console.log("✅ Muvaffaqiyatli! SMS yuborilmadi (Test Mode).");
+    console.log("✅ OK! SMS simulyatsiya qilindi.");
     return data;
 }
 
@@ -65,7 +56,7 @@ async function verifyOtp(req) {
   const code = body.code || body.token;
 
   if (phone) {
-      // Verify paytida ham xuddi shu format: +15551234567
+      // Verify paytida ham plyuslash kerak
       const clean = phone.replace(/[^\d]/g, '');
       phone = `+${clean}`;
   }
@@ -73,7 +64,7 @@ async function verifyOtp(req) {
   if (!phone) throw badRequest("phone is required");
   if (!code) throw badRequest("code is required");
 
-  console.log(`🔍 Tekshirilyapti: '${phone}' kod: '${code}'`);
+  console.log(`🔍 Verify: '${phone}' code: '${code}'`);
 
   const { data, error } = await authClient.auth.verifyOtp({
     phone,
@@ -86,9 +77,9 @@ async function verifyOtp(req) {
   const user = data.user;
   const session = data.session;
 
-  if (!user || !session) throw badRequest("Auth verification failed");
+  if (!user || !session) throw badRequest("Verification failed");
 
-  // Profilni tekshirish
+  // Profilni tekshirish yoki yaratish
   const { data: profile } = await dbClient
     .from('profiles')
     .select('user_id')
