@@ -1,23 +1,25 @@
 // /home/mzokirovic/Desktop/yol-yolakay-backend/src/modules/auth/auth.service.js
 
+require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const dbClient = require('../../core/db/supabase');
 
-// 1. URL (Sizniki)
-const AUTH_URL = "https://xfmptfmxiyssbejwdmgz.supabase.co";
+// 1. O'zgaruvchilarni qattiq tekshiramiz
+const AUTH_URL = process.env.SUPABASE_URL;
+const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-// 2. KALIT (DIQQAT: .trim() funksiyasi qo'shildi)
-// Bu har qanday bo'sh joyni (probelni) olib tashlaydi.
-const RAW_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmbXB0Zm14aXlzc2JlandkbWd6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzODc2NzksImV4cCI6MjA4Mzk2MzY3OX0.vHLfRA8gnhBDaaOwW_3uyLrttqbeqBz5oKQfuUMNcFo";
-const AUTH_KEY = RAW_KEY.trim();
+if (!AUTH_URL || !SERVICE_KEY) {
+    console.error("❌ XATO: .env faylida yoki Render Environmentda kalitlar yo'q!");
+    console.error("Tekshiring: SUPABASE_URL va SUPABASE_SERVICE_ROLE_KEY");
+    throw new Error("Server konfiguratsiya xatosi");
+}
 
-console.log("🛠️ BACKEND URL:", AUTH_URL);
-
-const authClient = createClient(AUTH_URL, AUTH_KEY, {
+// 2. Admin Client yaratamiz (Eng ishonchli usul)
+// Bu client har qanday operatsiyani bajara oladi, lekin biz uni to'g'ri ishlatamiz.
+const supabaseAdmin = createClient(AUTH_URL, SERVICE_KEY, {
     auth: {
         autoRefreshToken: false,
-        persistSession: false,
-        detectSessionInUrl: false
+        persistSession: false
     }
 });
 
@@ -27,52 +29,79 @@ function badRequest(msg) {
   return err;
 }
 
-// ✅ SEND OTP
+/**
+ * ✅ SEND OTP
+ * Haqiqiy ilova logikasi:
+ * - Raqamni oladi.
+ * - Supabasega "SMS yubor" deb buyruq beradi.
+ * - Agar bu Test Raqam bo'lsa, Supabase SMS yubormaydi, lekin "Success" deydi.
+ * - Agar bu Haqiqiy raqam bo'lsa (va Twilio ulangan bo'lsa), SMS ketadi.
+ */
 async function sendOtp(phoneInput) {
-    // 🔴 YANGI TEST RAQAM (PLYUS BILAN)
-    // Dashboardda "19999999999" (plyussiz) -> Bu yerda "+19999999999"
-    const TEST_PHONE = "+19999999999";
+    if (typeof phoneInput !== 'string') throw badRequest("Telefon raqam string bo'lishi kerak");
 
-    console.log(`🧪 TEST REJIMI: '${TEST_PHONE}' raqamiga so'rov ketdi...`);
+    // Formatlash: Har doim E.164 standarti (+998...)
+    let phone = phoneInput.replace(/[^\d]/g, '');
+    const finalPhone = `+${phone}`;
 
-    const { data, error } = await authClient.auth.signInWithOtp({
-        phone: TEST_PHONE,
+    console.log(`📡 OTP so'rovi: ${finalPhone}`);
+
+    // Standard Supabase funksiyasi
+    const { data, error } = await supabaseAdmin.auth.signInWithOtp({
+        phone: finalPhone,
     });
 
     if (error) {
-        console.error("🔥 Supabase XATOSI:", error.message);
+        console.error("🔥 Supabase OTP Error:", error.message);
+        // Agar Twilio ulanmagan bo'lsa va bu oddiy raqam bo'lsa, xato berishi tabiiy.
+        // Lekin Test Raqam (19999999999) uchun xato bermasligi kerak.
         throw error;
     }
 
-    console.log("✅ SUCCESS! 200 OK. Twilio ishlatilmadi.");
-    return data;
+    console.log("✅ OTP yuborildi (yoki Test Raqam qabul qilindi).");
+    return { success: true, message: "OTP sent" };
 }
 
-// ✅ VERIFY OTP
+/**
+ * ✅ VERIFY OTP
+ * Haqiqiy ilova logikasi:
+ * - Raqam va Kodni oladi.
+ * - Supabasega "Shu kod to'g'rimi?" deb so'raydi.
+ * - Agar to'g'ri bo'lsa, User va Session qaytaradi.
+ */
 async function verifyOtp(req) {
   const body = req.body || {};
+  let phoneInput = body.phone || "";
   const code = body.code || body.token;
 
-  // Verify paytida ham o'sha YANGI test raqam
-  const TEST_PHONE = "+19999999999";
+  if (!phoneInput) throw badRequest("Telefon raqam kiritilmadi");
+  if (!code) throw badRequest("Kod kiritilmadi");
 
-  if (!code) throw badRequest("code is required");
+  // Formatlash
+  let phone = phoneInput.replace(/[^\d]/g, '');
+  const finalPhone = `+${phone}`;
 
-  console.log(`🔍 Verify: '${TEST_PHONE}' code: '${code}'`);
+  console.log(`🔍 Kod tekshirilyapti: ${finalPhone} | Kod: ${code}`);
 
-  const { data, error } = await authClient.auth.verifyOtp({
-    phone: TEST_PHONE,
+  // Admin Client orqali tekshiramiz (Bu eng ishonchli yo'l)
+  const { data, error } = await supabaseAdmin.auth.verifyOtp({
+    phone: finalPhone,
     token: code,
     type: 'sms',
   });
 
-  if (error) throw error;
+  if (error) {
+      console.error("Verify Error:", error.message);
+      throw badRequest("Kod noto'g'ri yoki eskirgan");
+  }
 
   const user = data.user;
   const session = data.session;
 
-  if (!user || !session) throw badRequest("Verification failed");
+  if (!user || !session) throw badRequest("Tizim xatosi: Session yaratilmadi");
 
+  // Profilni tekshirish (Real DB logikasi)
+  // User ro'yxatdan o'tganmi yoki yangimi?
   const { data: profile } = await dbClient
     .from('profiles')
     .select('user_id')
@@ -83,7 +112,7 @@ async function verifyOtp(req) {
     userId: user.id,
     accessToken: session.access_token,
     refreshToken: session.refresh_token,
-    isNewUser: !profile,
+    isNewUser: !profile, // Agar profil bo'lmasa, demak yangi user
   };
 }
 
