@@ -23,10 +23,15 @@ async function sendOtp(req, res, next) {
 
 async function verifyOtp(req, res, next) {
   try {
-    // Controller "req" ni servicega tiqishtirmasligi kerak, lekin
-    // sizning serviceingiz "req" kutayotgan ekan, hozircha tegmaymiz.
-    // Lekin sendOtp to'g'irlandi.
     const data = await service.verifyOtp(req);
+
+    // ✅ FAQAT DEBUG: tokenlarni yashirib log qilamiz
+    console.log("✅ verifyOtp response:", {
+      ...data,
+      access_token: data.access_token ? "<redacted>" : null,
+      refresh_token: data.refresh_token ? "<redacted>" : null,
+    });
+
     res.json(data);
   } catch (e) {
     next(e);
