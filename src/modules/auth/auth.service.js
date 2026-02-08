@@ -4,22 +4,19 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const dbClient = require('../../core/db/supabase');
 
-// 1. O'zgaruvchilarni tekshiramiz
 const AUTH_URL = process.env.SUPABASE_URL;
 const SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
-if (!AUTH_URL || !SERVICE_KEY) {
-    console.error("❌ XATO: .env faylida yoki Render Environmentda kalitlar yo'q!");
-    throw new Error("Server konfiguratsiya xatosi");
-}
-
-// 2. Admin Client yaratamiz
 const supabaseAdmin = createClient(AUTH_URL, SERVICE_KEY, {
-    auth: {
-        autoRefreshToken: false,
-        persistSession: false
-    }
+    auth: { autoRefreshToken: false, persistSession: false }
 });
+
+// Test raqamlari va kodlarini shu yerda markazlashtiramiz
+const TEST_ACCOUNTS = {
+    '+998975387877': '777777',
+    '+998500127129': '000000',
+    '+19999999999': '111111'
+};
 
 function badRequest(msg) {
   const err = new Error(msg);
@@ -27,88 +24,90 @@ function badRequest(msg) {
   return err;
 }
 
-/**
- * ✅ SEND OTP
- * Universal yechim: Barcha raqamlar uchun Twilio (provayder) xatolarini chetlab o'tadi.
- */
+/** ✅ SEND OTP */
 async function sendOtp(phoneInput) {
-    if (typeof phoneInput !== 'string') throw badRequest("Telefon raqam string bo'lishi kerak");
-
     let phone = phoneInput.replace(/[^\d]/g, '');
     const finalPhone = `+${phone}`;
-
     console.log(`📡 OTP so'rovi: ${finalPhone}`);
 
-    const { data, error } = await supabaseAdmin.auth.signInWithOtp({
+    // Avval foydalanuvchini admin sifatida yaratishga yoki topishga urinamiz
+    // Bu foydalanuvchini Supabase Users ro'yxatida paydo bo'lishini ta'minlaydi
+    await supabaseAdmin.auth.admin.createUser({
         phone: finalPhone,
-    });
+        phone_confirm: true // SMS tasdiqlashni kutmasdan tasdiqlaymiz
+    }).catch(() => console.log("User allaqachon mavjud"));
+
+    const { error } = await supabaseAdmin.auth.signInWithOtp({ phone: finalPhone });
 
     if (error) {
-        // 🔥 UNIVERSAL FILTR: Har qanday raqamda Twilio xatosi chiqsa, uni bypass qiladi
         const isProviderError = error.message.toLowerCase().includes('provider') ||
-                                error.message.toLowerCase().includes('twilio') ||
-                                error.message.toLowerCase().includes('sms');
-
-        if (isProviderError) {
-            console.warn(`⚠️ Twilio xatosi bypass qilindi: ${finalPhone}`);
-            return { success: true, message: "OTP sent (Bypass Mode)" };
+                                error.message.toLowerCase().includes('twilio');
+        if (isProviderError || TEST_ACCOUNTS[finalPhone]) {
+            console.warn(`⚠️ SMS Bypass faol: ${finalPhone}`);
+            return { success: true, message: "OTP sent (Bypass)" };
         }
-
-        console.error("🔥 Haqiqiy Supabase Xatosi:", error.message);
         throw error;
     }
-
-    console.log("✅ OTP yuborildi.");
     return { success: true, message: "OTP sent" };
 }
 
-/**
- * ✅ VERIFY OTP
- */
+/** ✅ VERIFY OTP */
 async function verifyOtp(req) {
-  const body = req.body || {};
-  let phoneInput = body.phone || "";
-  const code = body.code || body.token;
-
-  if (!phoneInput) throw badRequest("Telefon raqam kiritilmadi");
-  if (!code) throw badRequest("Kod kiritilmadi");
-
+  const { phone: phoneInput, code } = req.body;
   let phone = phoneInput.replace(/[^\d]/g, '');
   const finalPhone = `+${phone}`;
+  const inputCode = code.toString().trim();
 
-  console.log(`🔍 Kod tekshirilyapti: ${finalPhone} | Kod: ${code}`);
+  console.log(`🔍 Tekshiruv: ${finalPhone} | Kod: ${inputCode}`);
 
-  const { data, error } = await supabaseAdmin.auth.verifyOtp({
-    phone: finalPhone,
-    token: code.toString(),
-    type: 'sms',
-  });
+  // 1. TEST REJIMINI TEKSHIRISH (Dashboard-ga bog'lanmagan bo'lsa ham ishlaydi)
+  if (TEST_ACCOUNTS[finalPhone] === inputCode) {
+      console.log("✅ TEST MODE: Kirishga ruxsat berildi");
 
-  if (error) {
-      console.error("❌ Verify Error:", error.message);
-      throw badRequest(`Kod noto'g'ri yoki eskirgan: ${error.message}`);
+      // Admin huquqi bilan foydalanuvchi ma'lumotlarini olamiz
+      const { data: { users }, error: listError } = await supabaseAdmin.auth.admin.listUsers();
+      let user = users.find(u => u.phone === finalPhone);
+
+      // Agar user topilmasa, yaratamiz
+      if (!user) {
+          const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
+              phone: finalPhone,
+              phone_confirm: true
+          });
+          if (createError) throw createError;
+          user = newUser.user;
+      }
+
+      // Foydalanuvchi uchun yangi sessiya (token) yaratamiz
+      const { data: sessionData, error: sessionError } = await supabaseAdmin.auth.admin.generateLink({
+          type: 'magiclink', // yoki 'signup'
+          email: user.email, // telefon bo'lsa telefon ishlatiladi
+          phone: finalPhone
+      });
+
+      // SODDALASHTIRILGAN JAVOB: Test uchun foydalanuvchi ID sini qaytaramiz
+      const { data: profile } = await dbClient.from('profiles').select('user_id').eq('user_id', user.id).single();
+
+      return {
+          userId: user.id,
+          accessToken: "test_token_" + Math.random().toString(36).substr(2),
+          refreshToken: "test_refresh",
+          isNewUser: !profile,
+      };
   }
 
-  const user = data.user;
-  const session = data.session;
+  // 2. NORMAL REJIM (Haqiqiy SMS kelsa)
+  const { data, error } = await supabaseAdmin.auth.verifyOtp({ phone: finalPhone, token: inputCode, type: 'sms' });
+  if (error) throw badRequest(`Xato: ${error.message}`);
 
-  if (!user || !session) throw badRequest("Tizim xatosi: Session yaratilmadi");
-
-  const { data: profile } = await dbClient
-    .from('profiles')
-    .select('user_id')
-    .eq('user_id', user.id)
-    .single();
+  const { data: profile } = await dbClient.from('profiles').select('user_id').eq('user_id', data.user.id).single();
 
   return {
-    userId: user.id,
-    accessToken: session.access_token,
-    refreshToken: session.refresh_token,
+    userId: data.user.id,
+    accessToken: data.session.access_token,
+    refreshToken: data.session.refresh_token,
     isNewUser: !profile,
   };
 }
 
-module.exports = {
-    sendOtp,
-    verifyOtp
-};
+module.exports = { sendOtp, verifyOtp };
