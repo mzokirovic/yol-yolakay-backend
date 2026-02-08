@@ -4,13 +4,21 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const dbClient = require('../../core/db/supabase');
 
+// 1. URL va KEY borligini tekshiramiz
 const authUrl = process.env.SUPABASE_URL;
 const authKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
 
-if (!authUrl || !authKey) throw new Error("AUTH SERVICE ERROR: Key not found");
+if (!authUrl || !authKey) {
+    throw new Error("KRITIK XATO: .env faylida SUPABASE_URL yoki KEY yo'q!");
+}
 
+// 2. Auth Client yaratamiz
 const authClient = createClient(authUrl, authKey, {
-    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false }
+    auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        detectSessionInUrl: false
+    }
 });
 
 function badRequest(msg) {
@@ -19,28 +27,34 @@ function badRequest(msg) {
   return err;
 }
 
-// ✅ SEND OTP (Backend Plyus qo'shib beradi)
+// ✅ SEND OTP (Mantiq: Tozalash -> Plyuslash -> Yuborish)
 async function sendOtp(phone) {
-    if (typeof phone !== 'string') throw new Error("Phone must be a string");
+    if (typeof phone !== 'string') {
+        throw new Error("Phone must be a string");
+    }
 
-    // 1. TOZALASH: Har qanday belgini (probel, tire, plyus) olib tashlaymiz
-    // Masalan: "1 (555) 123-4567" -> "15551234567"
+    console.log(`📡 Ilovadan keldi: '${phone}'`);
+
+    // A) TOZALASH: Faqat raqamlarni qoldiramiz
     let cleanPhone = phone.replace(/[^\d]/g, '');
 
-    // 2. FORMATLASH: Majburan boshiga + qo'shamiz
-    // Natija: "+15551234567"
+    // B) FORMATLASH: Har doim boshiga + qo'shamiz
+    // Supabase bazasida raqamlar + bilan saqlanadi (garchi UI da ko'rinmasa ham)
     const finalPhone = `+${cleanPhone}`;
 
-    console.log(`🚀 Sending OTP to: '${finalPhone}'`);
+    console.log(`🚀 Supabasega yuborilyapti: '${finalPhone}'`);
 
     const { data, error } = await authClient.auth.signInWithOtp({
         phone: finalPhone,
     });
 
     if (error) {
-        console.error("🔥 Supabase Auth Error:", error.message);
+        console.error("🔥 Supabase Xatosi:", error.message);
+        console.error("💡 Maslahat: Agar 'Twilio' xatosi chiqsa, demak Supabase Dashboardda bu raqam TEST ro'yxatida yo'q!");
         throw error;
     }
+
+    console.log("✅ Muvaffaqiyatli! SMS yuborilmadi (Test Mode).");
     return data;
 }
 
@@ -51,7 +65,7 @@ async function verifyOtp(req) {
   const code = body.code || body.token;
 
   if (phone) {
-      // Verify paytida ham xuddi shu mantiq: tozalab, plyus qo'shamiz
+      // Verify paytida ham xuddi shu format: +15551234567
       const clean = phone.replace(/[^\d]/g, '');
       phone = `+${clean}`;
   }
@@ -59,7 +73,7 @@ async function verifyOtp(req) {
   if (!phone) throw badRequest("phone is required");
   if (!code) throw badRequest("code is required");
 
-  console.log(`🔍 Verifying: '${phone}' with code: '${code}'`);
+  console.log(`🔍 Tekshirilyapti: '${phone}' kod: '${code}'`);
 
   const { data, error } = await authClient.auth.verifyOtp({
     phone,
@@ -74,6 +88,7 @@ async function verifyOtp(req) {
 
   if (!user || !session) throw badRequest("Auth verification failed");
 
+  // Profilni tekshirish
   const { data: profile } = await dbClient
     .from('profiles')
     .select('user_id')
