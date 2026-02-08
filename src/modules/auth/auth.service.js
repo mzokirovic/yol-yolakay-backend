@@ -1,16 +1,27 @@
 // /home/mzokirovic/Desktop/yol-yolakay-backend/src/modules/auth/auth.service.js
 
-require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const dbClient = require('../../core/db/supabase');
 
-const authUrl = process.env.SUPABASE_URL;
-const authKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+// 1. SIZNING ANIQ URLINGIZ (O'ZINGIZ TASDIQLADINGIZ)
+const AUTH_URL = "https://xfmptfmxiyssbejwdmgz.supabase.co";
 
-if (!authUrl || !authKey) throw new Error("AUTH SERVICE ERROR: Key not found");
+// 2. SIZNING KALITINGIZ (ENV dagi SUPABASE_ANON_KEY ni to'liq nusxalab qo'ying)
+// Oxiridagi yulduzchalar o'rniga haqiqiy harflarni yozing!
+const AUTH_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmbXB0Zm14aXlzc2JlandkbWd6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzODc2NzksImV4cCI6MjA4Mzk2MzY3OX0.vHLfRA8gnhBDaaOwW_3uyLrttqbeqBz5oKQfuUMN****";
 
-const authClient = createClient(authUrl, authKey, {
-    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false }
+console.log("🛠️ BACKEND ISHLATAYOTGAN URL:", AUTH_URL);
+
+if (AUTH_KEY.includes("****")) {
+    console.error("❌ DIQQAT: Siz AUTH_KEY ni to'liq yozmadingiz! Kod ichini to'g'rilang.");
+}
+
+const authClient = createClient(AUTH_URL, AUTH_KEY, {
+    auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+        detectSessionInUrl: false
+    }
 });
 
 function badRequest(msg) {
@@ -19,55 +30,45 @@ function badRequest(msg) {
   return err;
 }
 
-// ✅ SEND OTP (Real User yaratish uchun)
-async function sendOtp(phone) {
-    if (typeof phone !== 'string') throw new Error("Phone must be a string");
+// ✅ SEND OTP (DIAGNOSTIKA)
+async function sendOtp(phoneInput) {
+    // Ilovadan nima kelishidan qat'iy nazar...
 
-    // 1. TOZALASH: Har qanday belgini (probel, tire, plyus) olib tashlaymiz
-    // Masalan: "1 (555) 123-4567" -> "15551234567"
-    let cleanPhone = phone.replace(/[^\d]/g, '');
+    // Biz Supabasega "E.164" formatida (+1...) yuborishimiz SHART.
+    // Dashboardda "1555..." yozilgan bo'lsa ham, API "+" talab qiladi.
+    const TEST_PHONE = "+15551234567";
 
-    // 2. FORMATLASH: Majburan boshiga + qo'shamiz
-    // Natija: "+15551234567" (Bu Supabase kutayotgan format)
-    const finalPhone = `+${cleanPhone}`;
+    console.log(`🧪 TEST REJIMI: Biz Supabasega majburlab '${TEST_PHONE}' yuboryapmiz.`);
+    console.log(`🎯 Maqsad: '${AUTH_URL}' dagi Test Numbers ro'yxati.`);
 
-    console.log(`🚀 Supabasega yuborilyapti: '${finalPhone}'`);
-
-    // 3. SO'ROV YUBORISH
-    // Supabase bu raqamni "Test Numbers" dan topsa, Twilio ishlatmaydi.
-    // Lekin Userni "auth.users" jadvaliga qo'shadi (agar yo'q bo'lsa).
     const { data, error } = await authClient.auth.signInWithOtp({
-        phone: finalPhone,
+        phone: TEST_PHONE,
     });
 
     if (error) {
-        console.error("🔥 XATO:", error.message);
+        console.error("🔥 Supabase XATOSI:", error.message);
+        console.error("💡 SABAB: Supabase bu raqamni Test Ro'yxatdan topa olmadi va Twilio ishlatishga urindi.");
         throw error;
     }
 
-    console.log("✅ OK! SMS simulyatsiya qilindi.");
+    console.log("✅ SUCCESS! 200 OK. Supabase Test Nomerni tanidi!");
     return data;
 }
 
 // ✅ VERIFY OTP
 async function verifyOtp(req) {
   const body = req.body || {};
-  let phone = body.phone;
   const code = body.code || body.token;
 
-  if (phone) {
-      // Verify paytida ham plyuslash kerak
-      const clean = phone.replace(/[^\d]/g, '');
-      phone = `+${clean}`;
-  }
+  // Verify paytida ham o'sha test raqam
+  const TEST_PHONE = "+15551234567";
 
-  if (!phone) throw badRequest("phone is required");
   if (!code) throw badRequest("code is required");
 
-  console.log(`🔍 Verify: '${phone}' code: '${code}'`);
+  console.log(`🔍 Verify: '${TEST_PHONE}' code: '${code}'`);
 
   const { data, error } = await authClient.auth.verifyOtp({
-    phone,
+    phone: TEST_PHONE,
     token: code,
     type: 'sms',
   });
@@ -79,7 +80,6 @@ async function verifyOtp(req) {
 
   if (!user || !session) throw badRequest("Verification failed");
 
-  // Profilni tekshirish yoki yaratish
   const { data: profile } = await dbClient
     .from('profiles')
     .select('user_id')
