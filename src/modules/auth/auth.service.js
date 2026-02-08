@@ -4,20 +4,13 @@ require('dotenv').config();
 const { createClient } = require('@supabase/supabase-js');
 const dbClient = require('../../core/db/supabase');
 
-// Auth Client
 const authUrl = process.env.SUPABASE_URL;
 const authKey = process.env.SUPABASE_ANON_KEY || process.env.SUPABASE_KEY;
 
-if (!authUrl || !authKey) {
-    throw new Error("AUTH SERVICE ERROR: .env faylida kalitlar yo'q!");
-}
+if (!authUrl || !authKey) throw new Error("AUTH SERVICE ERROR: Key not found");
 
 const authClient = createClient(authUrl, authKey, {
-    auth: {
-        autoRefreshToken: false,
-        persistSession: false,
-        detectSessionInUrl: false
-    }
+    auth: { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false }
 });
 
 function badRequest(msg) {
@@ -26,28 +19,28 @@ function badRequest(msg) {
   return err;
 }
 
-// ✅ SEND OTP (PLYUSSIZ - Supabase Test Nomerga moslashgan)
+// ✅ SEND OTP (Backend Plyus qo'shib beradi)
 async function sendOtp(phone) {
-    if (typeof phone !== 'string') {
-        throw new Error("Phone must be a string");
-    }
+    if (typeof phone !== 'string') throw new Error("Phone must be a string");
 
-    // 1. TOZALASH: Faqat raqamlarni qoldiramiz.
-    // Plyus (+), probel, tire - hammasi ketadi.
-    // Masalan: "+998 90 123" -> "99890123"
+    // 1. TOZALASH: Har qanday belgini (probel, tire, plyus) olib tashlaymiz
+    // Masalan: "1 (555) 123-4567" -> "15551234567"
     let cleanPhone = phone.replace(/[^\d]/g, '');
 
-    console.log(`🚀 YUBORILAYOTGAN RAQAM (PLYUSSIZ): '${cleanPhone}'`);
+    // 2. FORMATLASH: Majburan boshiga + qo'shamiz
+    // Natija: "+15551234567"
+    const finalPhone = `+${cleanPhone}`;
+
+    console.log(`🚀 Sending OTP to: '${finalPhone}'`);
 
     const { data, error } = await authClient.auth.signInWithOtp({
-        phone: cleanPhone, // Plyus qo'shmaymiz!
+        phone: finalPhone,
     });
 
     if (error) {
         console.error("🔥 Supabase Auth Error:", error.message);
         throw error;
     }
-
     return data;
 }
 
@@ -57,13 +50,14 @@ async function verifyOtp(req) {
   let phone = body.phone;
   const code = body.code || body.token;
 
-  // Verify paytida ham faqat raqamlarni olamiz
   if (phone) {
-      phone = phone.replace(/[^\d]/g, '');
+      // Verify paytida ham xuddi shu mantiq: tozalab, plyus qo'shamiz
+      const clean = phone.replace(/[^\d]/g, '');
+      phone = `+${clean}`;
   }
 
   if (!phone) throw badRequest("phone is required");
-  if (!code) throw badRequest("code (or token) is required");
+  if (!code) throw badRequest("code is required");
 
   console.log(`🔍 Verifying: '${phone}' with code: '${code}'`);
 
@@ -78,21 +72,19 @@ async function verifyOtp(req) {
   const user = data.user;
   const session = data.session;
 
-  if (!user || !session) throw badRequest("Auth verification failed (No session)");
+  if (!user || !session) throw badRequest("Auth verification failed");
 
-  const { data: profile, error: profileError } = await dbClient
+  const { data: profile } = await dbClient
     .from('profiles')
     .select('user_id')
     .eq('user_id', user.id)
     .single();
 
-  const isNewUser = !profile;
-
   return {
     userId: user.id,
     accessToken: session.access_token,
     refreshToken: session.refresh_token,
-    isNewUser: isNewUser,
+    isNewUser: !profile,
   };
 }
 
