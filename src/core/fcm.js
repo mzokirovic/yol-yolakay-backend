@@ -26,7 +26,7 @@ async function sendToToken(token, payload) {
     // ✅ SENIOR FIX: "ttl: 0" - bu xabarni ushlab turmasdan darhol yetkazishni ta'minlaydi
     android: {
       priority: "high",
-      ttl: 0,
+      ttl: 24 * 60 * 60 * 1000,
     },
     // iOS uchun ham (kelajakda kerak bo'ladi)
     apns: {

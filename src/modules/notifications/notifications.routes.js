@@ -2,13 +2,13 @@ const express = require('express');
 const router = express.Router();
 const controller = require('./notifications.controller');
 
-const optionalAuth = require('../../core/optionalAuth');
+const requireAuth = require('../../core/requireAuth');
 
-router.use(optionalAuth); // ✅ Bearer bo'lsa req.user to'ladi, bo'lmasa fallback ishlaydi
+router.use(requireAuth); // ✅ endi hammasi JWT bilan
 
 router.get('/', controller.list);
 router.post('/read-all', controller.markAllRead);
-router.post("/token", controller.registerToken);
+router.post('/token', controller.registerToken);
 router.post('/test-push', controller.testPush);
 router.post('/:id/read', controller.markRead);
 

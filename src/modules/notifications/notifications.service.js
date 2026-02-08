@@ -35,36 +35,45 @@ async function testPush(userId) {
   const title = "Test Push";
   const body = "Bu test xabari";
 
-  // 1. Tokenlarni olish
+  // 1) Tokenlarni olish
   const { data: tokens, error } = await repo.listDeviceTokens(userId);
   if (error) throw error;
 
   const tokenList = (tokens || []).map(t => t.token).filter(Boolean);
   if (!tokenList.length) return { sent: 0, reason: "No device tokens for user" };
 
-  // 2. Bazaga yozish
-  await repo.createNotification({
+  // 2) Bazaga yozish (va ID ni olish)
+  const { data: created, error: createErr } = await repo.createNotification({
     user_id: userId,
     title,
     body,
     type: "TEST",
     is_read: false,
   });
+  if (createErr) throw createErr;
 
-  // 3. Jo'natish
+  // 3) Jo‘natish (notification_id bilan)
+  const payload = {
+    notification_id: String(created?.id ?? ""),
+    title,
+    body,
+    type: "TEST",
+  };
+
   let ok = 0, fail = 0;
   for (const t of tokenList) {
-    try { 
-        await sendToToken(t, { title, body }); 
-        ok++; 
-    } catch (e) { 
-        fail++; 
-        console.error("FCM_SEND_FAIL", e.message); 
+    try {
+      await sendToToken(t, payload);
+      ok++;
+    } catch (e) {
+      fail++;
+      console.error("FCM_SEND_FAIL", e.message);
     }
   }
 
-  return { sent: ok, failed: fail, tokens: tokenList.length };
+  return { sent: ok, failed: fail, tokens: tokenList.length, notification_id: payload.notification_id };
 }
+
 
 module.exports = {
   listNotifications,
