@@ -3,19 +3,15 @@
 const { createClient } = require('@supabase/supabase-js');
 const dbClient = require('../../core/db/supabase');
 
-// 1. SIZNING ANIQ URLINGIZ (O'ZINGIZ TASDIQLADINGIZ)
+// 1. SIZNING PROYEKT URL (To'g'ri)
 const AUTH_URL = "https://xfmptfmxiyssbejwdmgz.supabase.co";
 
-// 2. SIZNING KALITINGIZ (ENV dagi SUPABASE_ANON_KEY ni to'liq nusxalab qo'ying)
-// Oxiridagi yulduzchalar o'rniga haqiqiy harflarni yozing!
-const AUTH_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmbXB0Zm14aXlzc2JlandkbWd6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzODc2NzksImV4cCI6MjA4Mzk2MzY3OX0.vHLfRA8gnhBDaaOwW_3uyLrttqbeqBz5oKQfuUMN****";
+// 2. SIZ YUBORGAN KALIT (To'g'ri joylandi)
+const AUTH_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InhmbXB0Zm14aXlzc2JlandkbWd6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzODc2NzksImV4cCI6MjA4Mzk2MzY3OX0.vHLfRA8gnhBDaaOwW_3uyLrttqbeqBz5oKQfuUMNcFo";
 
 console.log("🛠️ BACKEND ISHLATAYOTGAN URL:", AUTH_URL);
 
-if (AUTH_KEY.includes("****")) {
-    console.error("❌ DIQQAT: Siz AUTH_KEY ni to'liq yozmadingiz! Kod ichini to'g'rilang.");
-}
-
+// Client yaratamiz
 const authClient = createClient(AUTH_URL, AUTH_KEY, {
     auth: {
         autoRefreshToken: false,
@@ -30,16 +26,16 @@ function badRequest(msg) {
   return err;
 }
 
-// ✅ SEND OTP (DIAGNOSTIKA)
+// ✅ SEND OTP (DIAGNOSTIKA MODE)
 async function sendOtp(phoneInput) {
-    // Ilovadan nima kelishidan qat'iy nazar...
+    // Biz hozircha har doim TEST raqamni ishlatamiz.
+    // Ilovadan nima kelishidan qat'iy nazar.
+    // MAQSAD: 500 xatosini yo'qotish va tizim ishlashini ko'rish.
 
-    // Biz Supabasega "E.164" formatida (+1...) yuborishimiz SHART.
-    // Dashboardda "1555..." yozilgan bo'lsa ham, API "+" talab qiladi.
+    // Supabase Dashboard -> Test Numbers ro'yxatida "15551234567" bo'lishi SHART!
     const TEST_PHONE = "+15551234567";
 
-    console.log(`🧪 TEST REJIMI: Biz Supabasega majburlab '${TEST_PHONE}' yuboryapmiz.`);
-    console.log(`🎯 Maqsad: '${AUTH_URL}' dagi Test Numbers ro'yxati.`);
+    console.log(`🧪 TEST REJIMI: Ilovadan '${phoneInput}' keldi, lekin biz '${TEST_PHONE}' yuboryapmiz.`);
 
     const { data, error } = await authClient.auth.signInWithOtp({
         phone: TEST_PHONE,
@@ -47,11 +43,10 @@ async function sendOtp(phoneInput) {
 
     if (error) {
         console.error("🔥 Supabase XATOSI:", error.message);
-        console.error("💡 SABAB: Supabase bu raqamni Test Ro'yxatdan topa olmadi va Twilio ishlatishga urindi.");
         throw error;
     }
 
-    console.log("✅ SUCCESS! 200 OK. Supabase Test Nomerni tanidi!");
+    console.log("✅ SUCCESS! 200 OK - SMS yuborilmadi (Test).");
     return data;
 }
 
@@ -78,7 +73,7 @@ async function verifyOtp(req) {
   const user = data.user;
   const session = data.session;
 
-  if (!user || !session) throw badRequest("Verification failed");
+  if (!user || !session) throw badRequest("Auth verification failed");
 
   const { data: profile } = await dbClient
     .from('profiles')
