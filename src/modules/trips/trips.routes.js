@@ -1,26 +1,30 @@
+// /src/modules/trips/trips.routes.js
 const express = require('express');
 const router = express.Router();
 const controller = require('./trips.controller');
+const requireAuth = require('../../core/requireAuth');
 
+// Public
 router.post('/calculate-price', controller.calculatePricePreview);
-
-router.post('/publish', controller.publishTrip);
 router.get('/search', controller.searchTrips);
-router.get('/my', controller.getMyTrips);
 
-// ✅ YANGI: Popular Points (ID'li rutdan oldin bo'lishi shart)
+// ✅ Popular Points (ID'li rutdan oldin bo'lishi shart)
 router.get('/points', controller.getPopularPoints);
 
+// Protected
+router.post('/publish', requireAuth, controller.publishTrip);
+router.get('/my', requireAuth, controller.getMyTrips);
+
+// Public details
 router.get('/:id', controller.getTripDetails);
 
-// Seat actions
-router.post('/:id/seats/:seatNo/block', controller.blockSeat);
-router.post('/:id/seats/:seatNo/unblock', controller.unblockSeat);
+// Seat actions (hammasi auth)
+router.post('/:id/seats/:seatNo/block', requireAuth, controller.blockSeat);
+router.post('/:id/seats/:seatNo/unblock', requireAuth, controller.unblockSeat);
 
-// MVP+ flow
-router.post('/:id/seats/:seatNo/request', controller.requestSeat);
-router.post('/:id/seats/:seatNo/cancel', controller.cancelRequest);
-router.post('/:id/seats/:seatNo/approve', controller.approveSeat);
-router.post('/:id/seats/:seatNo/reject', controller.rejectSeat);
+router.post('/:id/seats/:seatNo/request', requireAuth, controller.requestSeat);
+router.post('/:id/seats/:seatNo/cancel', requireAuth, controller.cancelRequest);
+router.post('/:id/seats/:seatNo/approve', requireAuth, controller.approveSeat);
+router.post('/:id/seats/:seatNo/reject', requireAuth, controller.rejectSeat);
 
 module.exports = router;
