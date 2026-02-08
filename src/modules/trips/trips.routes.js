@@ -1,4 +1,4 @@
-// /src/modules/trips/trips.routes.js
+// src/modules/trips/trips.routes.js
 const express = require('express');
 const router = express.Router();
 const controller = require('./trips.controller');
@@ -7,18 +7,14 @@ const requireAuth = require('../../core/requireAuth');
 // Public
 router.post('/calculate-price', controller.calculatePricePreview);
 router.get('/search', controller.searchTrips);
-
-// ✅ Popular Points (ID'li rutdan oldin bo'lishi shart)
 router.get('/points', controller.getPopularPoints);
+router.get('/:id', controller.getTripDetails);
 
-// Protected
+// Auth required
 router.post('/publish', requireAuth, controller.publishTrip);
 router.get('/my', requireAuth, controller.getMyTrips);
 
-// Public details
-router.get('/:id', controller.getTripDetails);
-
-// Seat actions (hammasi auth)
+// Seat actions (auth)
 router.post('/:id/seats/:seatNo/block', requireAuth, controller.blockSeat);
 router.post('/:id/seats/:seatNo/unblock', requireAuth, controller.unblockSeat);
 

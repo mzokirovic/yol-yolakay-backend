@@ -1,18 +1,16 @@
-// /home/mzokirovic/Desktop/yol-yolakay-backend/src/modules/trips/trips.controller.js
-
+// src/modules/trips/trips.controller.js
 const tripService = require('./trips.service');
 const pricingService = require('./pricing.service');
 const supabase = require('../../core/db/supabase');
 
 function getUserId(req) {
-  // ✅ Endi faqat JWT (requireAuth) orqali
   const uid = req.user?.id;
   if (!uid) {
     const err = new Error("Unauthorized");
     err.statusCode = 401;
     throw err;
   }
-  return String(uid);
+  return uid;
 }
 
 function parseSeatNo(seatNo) {
@@ -25,30 +23,18 @@ function parseSeatNo(seatNo) {
   return seat;
 }
 
-function toNum(v) {
-  const n = Number(v);
-  return Number.isFinite(n) ? n : null;
-}
+function isNil(v) { return v === null || v === undefined; }
 
-// --- CONTROLLER METHODS ---
+// ---------------- CONTROLLERS ----------------
 
 exports.calculatePricePreview = async (req, res) => {
   try {
     const { fromLat, fromLng, toLat, toLng } = req.body || {};
-
-    const aLat = toNum(fromLat);
-    const aLng = toNum(fromLng);
-    const bLat = toNum(toLat);
-    const bLng = toNum(toLng);
-
-    if (aLat == null || aLng == null || bLat == null || bLng == null) {
-      return res.status(400).json({
-        success: false,
-        error: { message: "Valid coords required (fromLat/fromLng/toLat/toLng)" }
-      });
+    if ([fromLat, fromLng, toLat, toLng].some(isNil)) {
+      return res.status(400).json({ success: false, error: { message: "Coords required" } });
     }
 
-    const dist = pricingService.calculateDistance(aLat, aLng, bLat, bLng);
+    const dist = pricingService.calculateDistance(fromLat, fromLng, toLat, toLng);
     const pricing = pricingService.calculateTripPrice(dist);
     return res.status(200).json({ success: true, ...pricing });
   } catch (e) {
@@ -61,8 +47,10 @@ exports.getPopularPoints = async (req, res) => {
     const { city } = req.query;
     let query = supabase.from('popular_points').select('*').eq('is_active', true);
     if (city) query = query.ilike('city_name', `%${city}%`);
+
     const { data, error } = await query;
     if (error) throw error;
+
     return res.status(200).json({ success: true, count: data.length, data });
   } catch (error) {
     return res.status(500).json({ success: false, error: { message: error.message } });
@@ -71,57 +59,35 @@ exports.getPopularPoints = async (req, res) => {
 
 exports.publishTrip = async (req, res) => {
   try {
-    const userId = getUserId(req); // ✅ JWT user
+    const userId = getUserId(req);
     const b = req.body || {};
 
-    const fromLocation = b.fromLocation ?? b.from_city;
-    const toLocation = b.toLocation ?? b.to_city;
+    const tripData = {
+      fromLocation: b.fromLocation ?? b.from_city,
+      toLocation: b.toLocation ?? b.to_city,
+      fromPointId: b.fromPointId || null,
+      toPointId: b.toPointId || null,
 
-    const fromPointId = b.fromPointId || null;
-    const toPointId = b.toPointId || null;
+      fromLat: b.fromLat ?? b.start_lat,
+      fromLng: b.fromLng ?? b.start_lng,
+      toLat: b.toLat ?? b.end_lat,
+      toLng: b.toLng ?? b.end_lng,
 
-    const fromLat = toNum(b.fromLat ?? b.start_lat);
-    const fromLng = toNum(b.fromLng ?? b.start_lng);
-    const toLat = toNum(b.toLat ?? b.end_lat);
-    const toLng = toNum(b.toLng ?? b.end_lng);
+      date: b.date,
+      time: b.time,
+      price: Number(b.price),
+      seats: parseInt(b.seats ?? b.available_seats, 10),
+    };
 
-    const date = b.date;
-    const time = b.time;
-
-    const price = toNum(b.price);
-    const seats = parseInt(b.seats ?? b.available_seats, 10);
-
-    // ✅ Validatsiyalar (real publish uchun shart)
-    if (!fromLocation || !toLocation) {
+    if (!tripData.fromLocation || !tripData.toLocation) {
       return res.status(400).json({ success: false, error: { message: "Manzillar kiritilmadi" } });
     }
-    if (!date || !time) {
-      return res.status(400).json({ success: false, error: { message: "Sana va vaqt shart" } });
-    }
-    if (price == null || price <= 0) {
+    if (!Number.isFinite(tripData.price) || tripData.price <= 0) {
       return res.status(400).json({ success: false, error: { message: "Narx noto‘g‘ri" } });
     }
-    if (Number.isNaN(seats) || seats < 1 || seats > 4) {
-      return res.status(400).json({ success: false, error: { message: "Seats 1..4 bo‘lishi kerak" } });
+    if (Number.isNaN(tripData.seats)) {
+      return res.status(400).json({ success: false, error: { message: "Seats noto‘g‘ri" } });
     }
-    if (fromLat == null || fromLng == null || toLat == null || toLng == null) {
-      return res.status(400).json({ success: false, error: { message: "Koordinatalar topilmadi" } });
-    }
-
-    const tripData = {
-      fromLocation,
-      toLocation,
-      fromPointId,
-      toPointId,
-      fromLat,
-      fromLng,
-      toLat,
-      toLng,
-      date,
-      time,
-      price,
-      seats,
-    };
 
     const newTrip = await tripService.createTrip(tripData, userId);
 
@@ -131,9 +97,7 @@ exports.publishTrip = async (req, res) => {
       trip: newTrip
     });
   } catch (error) {
-    console.error("Publish Error:", error);
-
-    const code = error.statusCode || error.status || 400;
+    const code = error.statusCode || 400;
     return res.status(code).json({ success: false, error: { message: error.message } });
   }
 };
@@ -151,18 +115,11 @@ exports.searchTrips = async (req, res) => {
 exports.getMyTrips = async (req, res) => {
   try {
     const userId = getUserId(req);
-    const result = await tripService.getUserTrips(userId);
-
-    // service sizda {data, error} qaytaryapti
-    if (result?.error) {
-      return res.status(500).json({ success: false, error: { message: result.error.message } });
-    }
-
-    const data = result?.data ?? [];
-    return res.status(200).json({ success: true, count: data.length, data });
+    const out = await tripService.getUserTrips(userId);
+    const list = out?.data || [];
+    return res.status(200).json({ success: true, count: list.length, data: list });
   } catch (error) {
-    const code = error.statusCode || error.status || 500;
-    return res.status(code).json({ success: false, error: { message: error.message } });
+    return res.status(500).json({ success: false, error: { message: error.message } });
   }
 };
 
@@ -176,25 +133,18 @@ exports.getTripDetails = async (req, res) => {
   }
 };
 
-// --- SEAT ACTIONS ---
-
+// Seat actions
 exports.requestSeat = async (req, res) => {
   try {
     const userId = getUserId(req);
     const { id, seatNo } = req.params;
     const { holderName } = req.body || {};
-
     const data = await tripService.requestSeat({
-      tripId: id,
-      seatNo: parseSeatNo(seatNo),
-      clientId: userId,
-      holderName
+      tripId: id, seatNo: parseSeatNo(seatNo), clientId: userId, holderName
     });
-
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    const code = e.statusCode || e.status || 500;
-    return res.status(code).json({ success: false, error: { message: e.message } });
+    return res.status(500).json({ success: false, error: { message: e.message } });
   }
 };
 
@@ -202,17 +152,12 @@ exports.cancelRequest = async (req, res) => {
   try {
     const userId = getUserId(req);
     const { id, seatNo } = req.params;
-
     const data = await tripService.cancelRequest({
-      tripId: id,
-      seatNo: parseSeatNo(seatNo),
-      clientId: userId
+      tripId: id, seatNo: parseSeatNo(seatNo), clientId: userId
     });
-
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    const code = e.statusCode || e.status || 500;
-    return res.status(code).json({ success: false, error: { message: e.message } });
+    return res.status(500).json({ success: false, error: { message: e.message } });
   }
 };
 
@@ -220,17 +165,12 @@ exports.approveSeat = async (req, res) => {
   try {
     const userId = getUserId(req);
     const { id, seatNo } = req.params;
-
     const data = await tripService.approveSeat({
-      tripId: id,
-      seatNo: parseSeatNo(seatNo),
-      driverId: userId
+      tripId: id, seatNo: parseSeatNo(seatNo), driverId: userId
     });
-
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    const code = e.statusCode || e.status || 500;
-    return res.status(code).json({ success: false, error: { message: e.message } });
+    return res.status(500).json({ success: false, error: { message: e.message } });
   }
 };
 
@@ -238,17 +178,12 @@ exports.rejectSeat = async (req, res) => {
   try {
     const userId = getUserId(req);
     const { id, seatNo } = req.params;
-
     const data = await tripService.rejectSeat({
-      tripId: id,
-      seatNo: parseSeatNo(seatNo),
-      driverId: userId
+      tripId: id, seatNo: parseSeatNo(seatNo), driverId: userId
     });
-
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    const code = e.statusCode || e.status || 500;
-    return res.status(code).json({ success: false, error: { message: e.message } });
+    return res.status(500).json({ success: false, error: { message: e.message } });
   }
 };
 
@@ -256,17 +191,12 @@ exports.blockSeat = async (req, res) => {
   try {
     const userId = getUserId(req);
     const { id, seatNo } = req.params;
-
     const data = await tripService.blockSeat({
-      tripId: id,
-      seatNo: parseSeatNo(seatNo),
-      driverId: userId
+      tripId: id, seatNo: parseSeatNo(seatNo), driverId: userId
     });
-
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    const code = e.statusCode || e.status || 500;
-    return res.status(code).json({ success: false, error: { message: e.message } });
+    return res.status(500).json({ success: false, error: { message: e.message } });
   }
 };
 
@@ -274,16 +204,11 @@ exports.unblockSeat = async (req, res) => {
   try {
     const userId = getUserId(req);
     const { id, seatNo } = req.params;
-
     const data = await tripService.unblockSeat({
-      tripId: id,
-      seatNo: parseSeatNo(seatNo),
-      driverId: userId
+      tripId: id, seatNo: parseSeatNo(seatNo), driverId: userId
     });
-
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    const code = e.statusCode || e.status || 500;
-    return res.status(code).json({ success: false, error: { message: e.message } });
+    return res.status(500).json({ success: false, error: { message: e.message } });
   }
 };
