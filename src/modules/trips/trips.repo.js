@@ -179,6 +179,7 @@ exports.cancelRequest = async ({ tripId, seatNo, clientId }) => {
     .update({ status: 'available', holder_client_id: null, holder_name: null })
     .eq('trip_id', tripId)
     .eq('seat_no', seatNo)
+    .eq('status', 'pending')
     .eq('holder_client_id', clientId); // Faqat o'zimnikini
   return { data, error };
 };
@@ -203,6 +204,7 @@ exports.rejectSeat = async ({ tripId, seatNo }) => {
     .update({ status: 'available', holder_client_id: null, holder_name: null })
     .eq('trip_id', tripId)
     .eq('seat_no', seatNo)
+    .eq('status', 'pending')
     .select()
     .maybeSingle();
   return { error };
@@ -229,6 +231,7 @@ exports.unblockSeatByDriver = async ({ tripId, seatNo }) => {
     .eq('trip_id', tripId)
     .eq('seat_no', seatNo)
     .eq('status', 'blocked')
+    .eq('status', 'pending')
     .select()
     .maybeSingle();
   return { data, error };

@@ -4,12 +4,11 @@ const repo = require('./trips.repo');
 const notifRepo = require('../notifications/notifications.repo');
 const pricingService = require('./pricing.service');
 const profileService = require('../profile/profile.service');
-const supabase = require('../../core/db/supabase');
+const supabase = require('../../core/db/supabase'); // ✅ kerak
 const { sendToToken } = require('../../core/fcm');
 
 // --- HELPER FUNCTIONS ---
 
-// 1) Push Notification yuborish
 async function notifyUser(userId, title, body, type, data = {}) {
   try {
     if (!userId) return;
@@ -25,7 +24,6 @@ async function notifyUser(userId, title, body, type, data = {}) {
   }
 }
 
-// 2) Haydovchi ekanligini tekshirish
 async function assertDriver(tripId, driverId) {
   const { data: trip, error } = await repo.getTripById(tripId);
   if (error) throw error;
@@ -43,7 +41,6 @@ async function assertDriver(tripId, driverId) {
   return trip;
 }
 
-// 3) User va Mashina ma'lumotlarini olish
 async function getDriverInfo(userId) {
   const profile = await profileService.getOrCreateProfile(userId);
 
@@ -64,7 +61,6 @@ async function getDriverInfo(userId) {
   return { profile, vehicle };
 }
 
-// 4) Lokatsiyani aniqlash
 async function resolveLocation(locationName, pointId, manualLat, manualLng) {
   return {
     name: locationName || "Noma'lum joy",
@@ -75,7 +71,7 @@ async function resolveLocation(locationName, pointId, manualLat, manualLng) {
 }
 
 // -----------------------------------------------------
-// ✅ MINIMAL YANGI QO‘SHIMCHA: seat ichiga holder_profile qo‘shish
+// ✅ MINIMAL: seat => holder_profile (snake_case) + pending privacy
 // -----------------------------------------------------
 
 function pickDisplayName(p) {
@@ -102,6 +98,22 @@ function pickRating(p) {
   return typeof r === 'number' ? r : null;
 }
 
+function canExposeProfile(seat, viewerId, isDriver) {
+  if (!seat) return false;
+  if (seat.status === 'booked') return true; // ✅ booked: hamma ko‘ra oladi
+  if (seat.status === 'pending') {
+    if (!viewerId) return false;
+    return isDriver || String(seat.holder_client_id) === String(viewerId);
+  }
+  return false;
+}
+
+// holder_client_id ni hamma ko‘rmasin: faqat driver yoki o‘zi
+function canExposeHolderId(seat, viewerId, isDriver) {
+  if (!seat || !viewerId) return false;
+  return isDriver || String(seat.holder_client_id) === String(viewerId);
+}
+
 async function loadPublicProfilesMap(userIds) {
   const ids = [...new Set((userIds || []).filter(Boolean))];
   if (ids.length === 0) return {};
@@ -119,23 +131,41 @@ async function loadPublicProfilesMap(userIds) {
   const map = {};
   for (const p of data || []) {
     map[p.id] = {
-      id: p.id,
-      displayName: pickDisplayName(p),
-      avatarUrl: pickAvatarUrl(p),
+      user_id: p.id,                           // ✅ snake_case
+      display_name: pickDisplayName(p),        // ✅ snake_case
+      avatar_url: pickAvatarUrl(p),            // ✅ snake_case
       rating: pickRating(p),
     };
   }
   return map;
 }
 
-async function enrichSeatsWithHolderProfiles(seats) {
-  const holderIds = (seats || []).map(s => s.holder_client_id).filter(Boolean);
-  const profilesMap = await loadPublicProfilesMap(holderIds);
+async function enrichSeatsWithHolderProfiles(seatsRaw, trip, viewerId) {
+  const driverId = trip?.driver_id ? String(trip.driver_id) : null;
+  const isDriver = viewerId && driverId && String(viewerId) === driverId;
 
-  return (seats || []).map(s => ({
-    ...s,
-    holder_profile: s.holder_client_id ? (profilesMap[s.holder_client_id] || null) : null,
-  }));
+  // Faqat ko‘rsatishga ruxsat bo‘lgan seatlar uchun profile yuklaymiz
+  const idsToLoad = (seatsRaw || [])
+    .filter(s => canExposeProfile(s, viewerId, isDriver))
+    .map(s => s.holder_client_id)
+    .filter(Boolean);
+
+  const profilesMap = await loadPublicProfilesMap(idsToLoad);
+
+  return (seatsRaw || []).map(s => {
+    const exposeProfile = canExposeProfile(s, viewerId, isDriver);
+    const exposeId = canExposeHolderId(s, viewerId, isDriver);
+
+    const holderId = s.holder_client_id ? String(s.holder_client_id) : null;
+    const profile = (exposeProfile && holderId) ? (profilesMap[holderId] || null) : null;
+
+    return {
+      ...s,
+      holder_client_id: exposeId ? s.holder_client_id : null,           // ✅ privacy
+      holder_name: exposeProfile ? s.holder_name : null,                // ✅ privacy (pending)
+      holder_profile: profile                                           // ✅ Android parse qiladi
+    };
+  });
 }
 
 // --- MAIN BUSINESS LOGIC ---
@@ -209,23 +239,21 @@ exports.getUserTrips = async (userId) => {
   return await repo.getUserTrips(userId);
 };
 
-exports.getTripDetails = async (tripId) => {
+// ✅ viewerId optional (optionalAuth bilan keladi)
+exports.getTripDetails = async (tripId, viewerId = null) => {
   const { data: trip, error: e1 } = await repo.getTripById(tripId);
   if (e1) throw e1;
 
   const { data: seatsRaw, error: e2 } = await repo.getTripSeats(tripId);
   if (e2) throw e2;
 
-  // ✅ MINIMAL: seats javobini boyitamiz
-  const seats = await enrichSeatsWithHolderProfiles(seatsRaw);
-
+  const seats = await enrichSeatsWithHolderProfiles(seatsRaw, trip, viewerId);
   return { trip, seats };
 };
 
 // --- SEAT ACTIONS ---
 
 exports.requestSeat = async ({ tripId, seatNo, clientId, holderName }) => {
-  // ✅ TEMIR QOIDA: haydovchi o'z safarida seat request qila olmaydi
   const { data: trip, error: eTrip } = await repo.getTripById(tripId);
   if (eTrip) throw eTrip;
 
@@ -246,7 +274,7 @@ exports.requestSeat = async ({ tripId, seatNo, clientId, holderName }) => {
 
   await repo.recalcTripAvailableSeats(tripId);
 
-  const result = await exports.getTripDetails(tripId);
+  const result = await exports.getTripDetails(tripId, clientId); // ✅ viewerId
   if (result.trip && result.trip.driver_id) {
     await notifyUser(
       result.trip.driver_id,
@@ -265,7 +293,7 @@ exports.cancelRequest = async ({ tripId, seatNo, clientId }) => {
 
   await repo.recalcTripAvailableSeats(tripId);
 
-  const result = await exports.getTripDetails(tripId);
+  const result = await exports.getTripDetails(tripId, clientId); // ✅ viewerId
   if (result.trip && result.trip.driver_id) {
     await notifyUser(
       result.trip.driver_id,
@@ -296,7 +324,6 @@ exports.approveSeat = async ({ tripId, seatNo, driverId }) => {
 
   await repo.recalcTripAvailableSeats(tripId);
 
-  // ✅ FIX: client_id emas, holder_client_id
   if (targetSeat && targetSeat.holder_client_id) {
     await notifyUser(
       targetSeat.holder_client_id,
@@ -307,7 +334,7 @@ exports.approveSeat = async ({ tripId, seatNo, driverId }) => {
     );
   }
 
-  return await exports.getTripDetails(tripId);
+  return await exports.getTripDetails(tripId, driverId); // ✅ viewerId
 };
 
 exports.rejectSeat = async ({ tripId, seatNo, driverId }) => {
@@ -317,12 +344,11 @@ exports.rejectSeat = async ({ tripId, seatNo, driverId }) => {
   const sNo = parseInt(seatNo, 10);
   const targetSeat = seatsBefore?.find(s => s.seat_no === sNo);
 
-  const { error } = await repo.rejectSeat({ tripId, seatNo });
+  const { data: updated, error } = await repo.rejectSeat({ tripId, seatNo });
   if (error) throw error;
 
   await repo.recalcTripAvailableSeats(tripId);
 
-  // ✅ FIX: client_id emas, holder_client_id
   if (targetSeat && targetSeat.holder_client_id) {
     await notifyUser(
       targetSeat.holder_client_id,
@@ -333,11 +359,10 @@ exports.rejectSeat = async ({ tripId, seatNo, driverId }) => {
     );
   }
 
-  return await exports.getTripDetails(tripId);
+  return await exports.getTripDetails(tripId, driverId); // ✅ viewerId
 };
 
 exports.blockSeat = async ({ tripId, seatNo, driverId }) => {
-  // ✅ Sizning mantiq: haydovchi o'z tripida seat'ni block qila oladi (saqlanadi)
   await assertDriver(tripId, driverId);
 
   const { data: updated, error } = await repo.blockSeatByDriver({ tripId, seatNo });
@@ -350,11 +375,10 @@ exports.blockSeat = async ({ tripId, seatNo, driverId }) => {
   }
 
   await repo.recalcTripAvailableSeats(tripId);
-  return await exports.getTripDetails(tripId);
+  return await exports.getTripDetails(tripId, driverId); // ✅ viewerId
 };
 
 exports.unblockSeat = async ({ tripId, seatNo, driverId }) => {
-  // ✅ Sizning mantiq: haydovchi o'z tripida block joyni ochib qo'ya oladi (saqlanadi)
   await assertDriver(tripId, driverId);
 
   const { data: updated, error } = await repo.unblockSeatByDriver({ tripId, seatNo });
@@ -362,5 +386,5 @@ exports.unblockSeat = async ({ tripId, seatNo, driverId }) => {
   if (!updated) throw new Error("Seat unblock qilib bo‘lmadi");
 
   await repo.recalcTripAvailableSeats(tripId);
-  return await exports.getTripDetails(tripId);
+  return await exports.getTripDetails(tripId, driverId); // ✅ viewerId
 };

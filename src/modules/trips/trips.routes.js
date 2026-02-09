@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const controller = require('./trips.controller');
 const requireAuth = require('../../core/requireAuth');
+const optionalAuth = require('../../core/optionalAuth');
 
 // Public
 router.post('/calculate-price', controller.calculatePricePreview);
@@ -23,6 +24,6 @@ router.post('/:id/seats/:seatNo/approve', requireAuth, controller.approveSeat);
 router.post('/:id/seats/:seatNo/reject', requireAuth, controller.rejectSeat);
 
 // Public (dynamic) - eng oxirida
-router.get('/:id', controller.getTripDetails);
+router.get('/:id', optionalAuth, controller.getTripDetails);
 
 module.exports = router;
