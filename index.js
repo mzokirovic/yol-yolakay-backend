@@ -47,7 +47,7 @@ app.get('/', (req, res) => {
 
 // ✅ Global Error Handler (Doim Routelardan KEYIN, lekin Listen dan OLDIN)
 app.use((err, req, res, next) => {
-  const code = err.statusCode || 500;
+  const code = err.statusCode || err.status || 500;
   console.error("SERVER_ERROR:", err);
   res.status(code).json({ success:false, error: err.message || "Server ichki xatosi" });
 });

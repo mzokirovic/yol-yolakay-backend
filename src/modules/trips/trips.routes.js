@@ -8,9 +8,8 @@ const requireAuth = require('../../core/requireAuth');
 router.post('/calculate-price', controller.calculatePricePreview);
 router.get('/search', controller.searchTrips);
 router.get('/points', controller.getPopularPoints);
-router.get('/:id', controller.getTripDetails);
 
-// Auth required
+// Auth required (static)
 router.post('/publish', requireAuth, controller.publishTrip);
 router.get('/my', requireAuth, controller.getMyTrips);
 
@@ -22,5 +21,8 @@ router.post('/:id/seats/:seatNo/request', requireAuth, controller.requestSeat);
 router.post('/:id/seats/:seatNo/cancel', requireAuth, controller.cancelRequest);
 router.post('/:id/seats/:seatNo/approve', requireAuth, controller.approveSeat);
 router.post('/:id/seats/:seatNo/reject', requireAuth, controller.rejectSeat);
+
+// Public (dynamic) - eng oxirida
+router.get('/:id', controller.getTripDetails);
 
 module.exports = router;

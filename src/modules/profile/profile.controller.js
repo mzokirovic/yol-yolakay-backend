@@ -4,22 +4,15 @@ const service = require('./profile.service');
 const supabase = require('../../core/db/supabase');
 
 function getUserId(req) {
-  // 1) Token
-  const tokenUserId = req.user?.id;
-  // 2) Header
-  const headerUserId = req.headers['x-user-id'];
-  // 3) Device ID
-  const deviceId = req.headers['x-device-id'];
-
-  const userId = tokenUserId || headerUserId || deviceId;
-
-  if (!userId) {
-    const err = new Error("Siz tizimga kirmagansiz (User ID topilmadi)");
-    err.status = 401;
+  const uid = req.user?.id;
+  if (!uid) {
+    const err = new Error("Unauthorized");
+    err.statusCode = 401;
     throw err;
   }
-  return String(userId);
+  return String(uid);
 }
+
 
 exports.getMe = async (req, res, next) => {
   try {

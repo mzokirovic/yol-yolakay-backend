@@ -1,76 +1,65 @@
-// /home/mzokirovic/Desktop/yol-yolakay-backend/src/modules/inbox/inbox.controller.js
-
 const service = require('./inbox.service');
 
 function getUserId(req) {
-  // 🚨 O'ZGARISH: Faqat Headerdan olinadi. Query param (URL) dan olish taqiqlandi.
-  const userId = req.headers['x-user-id'];
-  
-  if (!userId) {
-      // Agar middleware (req.user) bo'lsa, o'shani ham tekshirish mumkin
-      if (req.user && req.user.id) return req.user.id;
-      return null;
+  const uid = req.user?.id;
+  if (!uid) {
+    const err = new Error("Unauthorized");
+    err.statusCode = 401;
+    throw err;
   }
-  return String(userId);
+  return String(uid);
 }
 
 exports.listThreads = async (req, res) => {
   try {
     const userId = getUserId(req);
-    if (!userId) return res.status(401).json({ success: false, error: { message: "Unauthorized (x-user-id missing)" } });
-
     const data = await service.listThreads(userId);
     return res.status(200).json({ success: true, count: data.length, data });
   } catch (e) {
-    return res.status(500).json({ success: false, error: { message: e.message } });
+    const code = e.statusCode || 500;
+    return res.status(code).json({ success: false, error: { message: e.message } });
   }
 };
 
 exports.createThread = async (req, res) => {
   try {
     const userId = getUserId(req);
-    if (!userId) return res.status(401).json({ success: false, error: { message: "Unauthorized" } });
-
     const { peerId, tripId } = req.body || {};
     if (!peerId) return res.status(400).json({ success: false, error: { message: "peerId required" } });
 
     const thread = await service.createThread({ userId, peerId: String(peerId), tripId: tripId ? String(tripId) : null });
     return res.status(201).json({ success: true, thread });
   } catch (e) {
-    return res.status(500).json({ success: false, error: { message: e.message } });
+    const code = e.statusCode || 500;
+    return res.status(code).json({ success: false, error: { message: e.message } });
   }
 };
 
 exports.getThread = async (req, res) => {
   try {
     const userId = getUserId(req);
-    if (!userId) return res.status(401).json({ success: false, error: { message: "Unauthorized" } });
-
     const { id } = req.params;
     const data = await service.getThread({ userId, threadId: id });
-
     return res.status(200).json({ success: true, thread: data.thread, messages: data.messages });
   } catch (e) {
     if (e.code === 'FORBIDDEN') return res.status(403).json({ success: false, error: { message: e.message } });
-    return res.status(500).json({ success: false, error: { message: e.message } });
+    const code = e.statusCode || 500;
+    return res.status(code).json({ success: false, error: { message: e.message } });
   }
 };
 
 exports.sendMessage = async (req, res) => {
   try {
     const userId = getUserId(req);
-    if (!userId) return res.status(401).json({ success: false, error: { message: "Unauthorized" } });
-
     const { id } = req.params;
     const { text } = req.body || {};
-    if (!text || !String(text).trim()) {
-      return res.status(400).json({ success: false, error: { message: "text required" } });
-    }
+    if (!text || !String(text).trim()) return res.status(400).json({ success: false, error: { message: "text required" } });
 
     const msg = await service.sendMessage({ userId, threadId: id, text: String(text).trim() });
     return res.status(201).json({ success: true, message: msg });
   } catch (e) {
     if (e.code === 'FORBIDDEN') return res.status(403).json({ success: false, error: { message: e.message } });
-    return res.status(500).json({ success: false, error: { message: e.message } });
+    const code = e.statusCode || 500;
+    return res.status(code).json({ success: false, error: { message: e.message } });
   }
 };
