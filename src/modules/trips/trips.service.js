@@ -4,6 +4,7 @@ const repo = require('./trips.repo');
 const notifRepo = require('../notifications/notifications.repo');
 const pricingService = require('./pricing.service');
 const profileService = require('../profile/profile.service');
+const supabase = require('../../core/db/supabase');
 const { sendToToken } = require('../../core/fcm');
 
 // --- HELPER FUNCTIONS ---
@@ -71,6 +72,70 @@ async function resolveLocation(locationName, pointId, manualLat, manualLng) {
     lng: Number(manualLng) || 0.0,
     pointId: pointId || null
   };
+}
+
+// -----------------------------------------------------
+// ✅ MINIMAL YANGI QO‘SHIMCHA: seat ichiga holder_profile qo‘shish
+// -----------------------------------------------------
+
+function pickDisplayName(p) {
+  if (!p) return null;
+  return (
+    p.display_name ||
+    p.displayName ||
+    p.full_name ||
+    p.fullName ||
+    [p.first_name, p.last_name].filter(Boolean).join(' ') ||
+    p.name ||
+    null
+  );
+}
+
+function pickAvatarUrl(p) {
+  if (!p) return null;
+  return p.avatar_url || p.avatarUrl || p.photo_url || p.photoUrl || null;
+}
+
+function pickRating(p) {
+  if (!p) return null;
+  const r = p.rating ?? p.stars ?? p.rate ?? null;
+  return typeof r === 'number' ? r : null;
+}
+
+async function loadPublicProfilesMap(userIds) {
+  const ids = [...new Set((userIds || []).filter(Boolean))];
+  if (ids.length === 0) return {};
+
+  const { data, error } = await supabase
+    .from('profiles')
+    .select('*')
+    .in('id', ids);
+
+  if (error) {
+    console.error("profiles load error:", error.message);
+    return {};
+  }
+
+  const map = {};
+  for (const p of data || []) {
+    map[p.id] = {
+      id: p.id,
+      displayName: pickDisplayName(p),
+      avatarUrl: pickAvatarUrl(p),
+      rating: pickRating(p),
+    };
+  }
+  return map;
+}
+
+async function enrichSeatsWithHolderProfiles(seats) {
+  const holderIds = (seats || []).map(s => s.holder_client_id).filter(Boolean);
+  const profilesMap = await loadPublicProfilesMap(holderIds);
+
+  return (seats || []).map(s => ({
+    ...s,
+    holder_profile: s.holder_client_id ? (profilesMap[s.holder_client_id] || null) : null,
+  }));
 }
 
 // --- MAIN BUSINESS LOGIC ---
@@ -148,8 +213,11 @@ exports.getTripDetails = async (tripId) => {
   const { data: trip, error: e1 } = await repo.getTripById(tripId);
   if (e1) throw e1;
 
-  const { data: seats, error: e2 } = await repo.getTripSeats(tripId);
+  const { data: seatsRaw, error: e2 } = await repo.getTripSeats(tripId);
   if (e2) throw e2;
+
+  // ✅ MINIMAL: seats javobini boyitamiz
+  const seats = await enrichSeatsWithHolderProfiles(seatsRaw);
 
   return { trip, seats };
 };
