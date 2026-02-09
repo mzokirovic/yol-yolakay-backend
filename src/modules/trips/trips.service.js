@@ -99,31 +99,29 @@ exports.createTrip = async (data, userId) => {
     throw new Error("Seats 1..4 oralig'ida bo'lishi kerak");
   }
 
-  const dbPayload = {
-    driver_id: userId,
-    driver_name: profile.displayName,
-    phone_number: profile.phone,
-    car_model: `${vehicle.make} ${vehicle.model} (${vehicle.color})`,
+    const dbPayload = {
+      driver_id: userId,
+      driver_name: profile.displayName,
+      phone_number: profile.phone,
+      car_model: `${vehicle.make} ${vehicle.model} (${vehicle.color})`,
 
-    from_city: fromLoc.name,
-    to_city: toLoc.name,
-    departure_time: departureTime,
+      from_city: fromLoc.name,
+      to_city: toLoc.name,
+      departure_time: departureTime,
 
-    price: data.price,
-    available_seats: seatsNum,
-    status: 'active',
+      price: data.price,
+      available_seats: seatsNum,
+      status: 'active',
 
-    start_lat: fromLoc.lat,
-    start_lng: fromLoc.lng,
-    end_lat: toLoc.lat,
-    end_lng: toLoc.lng,
-    "startLat": fromLoc.lat,
-    "startLng": fromLoc.lng,
-    "endLat": toLoc.lat,
-    "endLng": toLoc.lng,
+      // ✅ DB schema bilan mos (snake_case)
+      start_lat: fromLoc.lat,
+      start_lng: fromLoc.lng,
+      end_lat: toLoc.lat,
+      end_lng: toLoc.lng,
 
-    meeting_point_id: fromLoc.pointId
-  };
+      meeting_point_id: fromLoc.pointId
+    };
+
 
   const { data: newTrip, error } = await repo.insertTrip(dbPayload);
   if (error) throw error;
