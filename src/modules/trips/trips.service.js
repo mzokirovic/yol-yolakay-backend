@@ -8,7 +8,7 @@ const { sendToToken } = require('../../core/fcm');
 
 // --- HELPER FUNCTIONS ---
 
-// 1. Push Notification yuborish
+// 1) Push Notification yuborish
 async function notifyUser(userId, title, body, type, data = {}) {
   try {
     if (!userId) return;
@@ -24,7 +24,7 @@ async function notifyUser(userId, title, body, type, data = {}) {
   }
 }
 
-// 2. Haydovchi ekanligini tekshirish
+// 2) Haydovchi ekanligini tekshirish
 async function assertDriver(tripId, driverId) {
   const { data: trip, error } = await repo.getTripById(tripId);
   if (error) throw error;
@@ -42,12 +42,12 @@ async function assertDriver(tripId, driverId) {
   return trip;
 }
 
-// 3. ✅ YANGILANGAN: User va Mashina ma'lumotlarini olish (Clean Architecture)
+// 3) User va Mashina ma'lumotlarini olish
 async function getDriverInfo(userId) {
   const profile = await profileService.getOrCreateProfile(userId);
 
   if (!profile || !profile.phone) {
-     throw new Error("Sayohat yaratish uchun profilingizda telefon raqamini kiriting.");
+    throw new Error("Sayohat yaratish uchun profilingizda telefon raqamini kiriting.");
   }
 
   const vehicle = await profileService.getVehicle(userId);
@@ -57,19 +57,19 @@ async function getDriverInfo(userId) {
   }
 
   if (!vehicle.model || !vehicle.plate) {
-      throw new Error("Mashina ma'lumotlari to'liq emas (Model va Raqam shart).");
+    throw new Error("Mashina ma'lumotlari to'liq emas (Model va Raqam shart).");
   }
 
   return { profile, vehicle };
 }
 
-// 4. ✅ YANGI: Lokatsiyani aniqlash
+// 4) Lokatsiyani aniqlash
 async function resolveLocation(locationName, pointId, manualLat, manualLng) {
   return {
-      name: locationName || "Noma'lum joy",
-      lat: Number(manualLat) || 0.0,
-      lng: Number(manualLng) || 0.0,
-      pointId: pointId || null
+    name: locationName || "Noma'lum joy",
+    lat: Number(manualLat) || 0.0,
+    lng: Number(manualLng) || 0.0,
+    pointId: pointId || null
   };
 }
 
@@ -83,7 +83,7 @@ exports.createTrip = async (data, userId) => {
 
   const departureTime = `${data.date}T${data.time}:00+05:00`;
   if (new Date(departureTime) < new Date()) {
-      throw new Error("O'tib ketgan vaqtga e'lon berib bo'lmaydi.");
+    throw new Error("O'tib ketgan vaqtga e'lon berib bo'lmaydi.");
   }
 
   const distance = pricingService.calculateDistance(fromLoc.lat, fromLoc.lng, toLoc.lat, toLoc.lng);
@@ -91,7 +91,7 @@ exports.createTrip = async (data, userId) => {
 
   const priceCheck = pricingService.validatePrice(data.price, priceCalc);
   if (!priceCheck.valid) {
-      throw new Error(priceCheck.message);
+    throw new Error(priceCheck.message);
   }
 
   const seatsNum = parseInt(data.seats, 10);
@@ -99,29 +99,27 @@ exports.createTrip = async (data, userId) => {
     throw new Error("Seats 1..4 oralig'ida bo'lishi kerak");
   }
 
-    const dbPayload = {
-      driver_id: userId,
-      driver_name: profile.displayName,
-      phone_number: profile.phone,
-      car_model: `${vehicle.make} ${vehicle.model} (${vehicle.color})`,
+  const dbPayload = {
+    driver_id: userId,
+    driver_name: profile.displayName,
+    phone_number: profile.phone,
+    car_model: `${vehicle.make} ${vehicle.model} (${vehicle.color})`,
 
-      from_city: fromLoc.name,
-      to_city: toLoc.name,
-      departure_time: departureTime,
+    from_city: fromLoc.name,
+    to_city: toLoc.name,
+    departure_time: departureTime,
 
-      price: data.price,
-      available_seats: seatsNum,
-      status: 'active',
+    price: data.price,
+    available_seats: seatsNum,
+    status: 'active',
 
-      // ✅ DB schema bilan mos (snake_case)
-      start_lat: fromLoc.lat,
-      start_lng: fromLoc.lng,
-      end_lat: toLoc.lat,
-      end_lng: toLoc.lng,
+    start_lat: fromLoc.lat,
+    start_lng: fromLoc.lng,
+    end_lat: toLoc.lat,
+    end_lng: toLoc.lng,
 
-      meeting_point_id: fromLoc.pointId
-    };
-
+    meeting_point_id: fromLoc.pointId
+  };
 
   const { data: newTrip, error } = await repo.insertTrip(dbPayload);
   if (error) throw error;
@@ -142,35 +140,53 @@ exports.searchTrips = async ({ from, to, date, passengers }) => {
   return data;
 };
 
-// ✅ YANGI: ID orqali olish
 exports.getUserTrips = async (userId) => {
-  // Endi Repo driverName ni emas, ID ni ishlatadi
   return await repo.getUserTrips(userId);
 };
 
 exports.getTripDetails = async (tripId) => {
   const { data: trip, error: e1 } = await repo.getTripById(tripId);
   if (e1) throw e1;
+
   const { data: seats, error: e2 } = await repo.getTripSeats(tripId);
   if (e2) throw e2;
+
   return { trip, seats };
 };
 
 // --- SEAT ACTIONS ---
 
 exports.requestSeat = async ({ tripId, seatNo, clientId, holderName }) => {
+  // ✅ TEMIR QOIDA: haydovchi o'z safarida seat request qila olmaydi
+  const { data: trip, error: eTrip } = await repo.getTripById(tripId);
+  if (eTrip) throw eTrip;
+
+  if (trip?.driver_id && String(trip.driver_id) === String(clientId)) {
+    const err = new Error("Haydovchi o'z safarida joy band qila olmaydi.");
+    err.code = "FORBIDDEN";
+    throw err;
+  }
+
   const { data: updated, error } = await repo.requestSeat({ tripId, seatNo, clientId, holderName });
   if (error) throw error;
+
   if (!updated) {
     const err = new Error("Seat available emas");
     err.code = "SEAT_NOT_AVAILABLE";
     throw err;
   }
+
   await repo.recalcTripAvailableSeats(tripId);
 
   const result = await exports.getTripDetails(tripId);
   if (result.trip && result.trip.driver_id) {
-      await notifyUser(result.trip.driver_id, "Yangi buyurtma! 🚖", `${holderName || "Bir yo'lovchi"} joy band qilmoqchi.`, "TRIP_REQUEST", { trip_id: tripId, seat_no: String(seatNo) });
+    await notifyUser(
+      result.trip.driver_id,
+      "Yangi buyurtma! 🚖",
+      `${holderName || "Bir yo'lovchi"} joy band qilmoqchi.`,
+      "TRIP_REQUEST",
+      { trip_id: tripId, seat_no: String(seatNo) }
+    );
   }
   return result;
 };
@@ -178,11 +194,18 @@ exports.requestSeat = async ({ tripId, seatNo, clientId, holderName }) => {
 exports.cancelRequest = async ({ tripId, seatNo, clientId }) => {
   const { error } = await repo.cancelRequest({ tripId, seatNo, clientId });
   if (error) throw error;
+
   await repo.recalcTripAvailableSeats(tripId);
 
   const result = await exports.getTripDetails(tripId);
   if (result.trip && result.trip.driver_id) {
-      await notifyUser(result.trip.driver_id, "Buyurtma bekor qilindi ⚠️", "Yo'lovchi joy so'rovini bekor qildi.", "TRIP_CANCELLED", { trip_id: tripId, seat_no: String(seatNo) });
+    await notifyUser(
+      result.trip.driver_id,
+      "Buyurtma bekor qilindi ⚠️",
+      "Yo'lovchi joy so'rovini bekor qildi.",
+      "TRIP_CANCELLED",
+      { trip_id: tripId, seat_no: String(seatNo) }
+    );
   }
   return result;
 };
@@ -191,20 +214,31 @@ exports.approveSeat = async ({ tripId, seatNo, driverId }) => {
   await assertDriver(tripId, driverId);
 
   const { data: seatsBefore } = await repo.getTripSeats(tripId);
-  const targetSeat = seatsBefore.find(s => s.seat_no === parseInt(seatNo));
+  const sNo = parseInt(seatNo, 10);
+  const targetSeat = seatsBefore?.find(s => s.seat_no === sNo);
 
   const { data: updated, error } = await repo.approveSeat({ tripId, seatNo });
   if (error) throw error;
+
   if (!updated) {
-     const err = new Error("Approve bo‘lmadi");
-     err.code = "SEAT_NOT_AVAILABLE";
-     throw err;
+    const err = new Error("Approve bo‘lmadi");
+    err.code = "SEAT_NOT_AVAILABLE";
+    throw err;
   }
+
   await repo.recalcTripAvailableSeats(tripId);
 
-  if (targetSeat && targetSeat.client_id) {
-      await notifyUser(targetSeat.client_id, "So'rovingiz qabul qilindi! ✅", "Haydovchi buyurtmangizni tasdiqladi.", "TRIP_APPROVED", { trip_id: tripId, seat_no: String(seatNo) });
+  // ✅ FIX: client_id emas, holder_client_id
+  if (targetSeat && targetSeat.holder_client_id) {
+    await notifyUser(
+      targetSeat.holder_client_id,
+      "So'rovingiz qabul qilindi! ✅",
+      "Haydovchi buyurtmangizni tasdiqladi.",
+      "TRIP_APPROVED",
+      { trip_id: tripId, seat_no: String(seatNo) }
+    );
   }
+
   return await exports.getTripDetails(tripId);
 };
 
@@ -212,36 +246,53 @@ exports.rejectSeat = async ({ tripId, seatNo, driverId }) => {
   await assertDriver(tripId, driverId);
 
   const { data: seatsBefore } = await repo.getTripSeats(tripId);
-  const targetSeat = seatsBefore.find(s => s.seat_no === parseInt(seatNo));
+  const sNo = parseInt(seatNo, 10);
+  const targetSeat = seatsBefore?.find(s => s.seat_no === sNo);
 
   const { error } = await repo.rejectSeat({ tripId, seatNo });
   if (error) throw error;
+
   await repo.recalcTripAvailableSeats(tripId);
 
-  if (targetSeat && targetSeat.client_id) {
-      await notifyUser(targetSeat.client_id, "So'rovingiz rad etildi ❌", "Afsuski, haydovchi buyurtmani qabul qilmadi.", "TRIP_REJECTED", { trip_id: tripId, seat_no: String(seatNo) });
+  // ✅ FIX: client_id emas, holder_client_id
+  if (targetSeat && targetSeat.holder_client_id) {
+    await notifyUser(
+      targetSeat.holder_client_id,
+      "So'rovingiz rad etildi ❌",
+      "Afsuski, haydovchi buyurtmani qabul qilmadi.",
+      "TRIP_REJECTED",
+      { trip_id: tripId, seat_no: String(seatNo) }
+    );
   }
+
   return await exports.getTripDetails(tripId);
 };
 
 exports.blockSeat = async ({ tripId, seatNo, driverId }) => {
+  // ✅ Sizning mantiq: haydovchi o'z tripida seat'ni block qila oladi (saqlanadi)
   await assertDriver(tripId, driverId);
+
   const { data: updated, error } = await repo.blockSeatByDriver({ tripId, seatNo });
   if (error) throw error;
+
   if (!updated) {
-     const err = new Error("Seat block qilib bo‘lmadi");
-     err.code = "SEAT_NOT_AVAILABLE";
-     throw err;
+    const err = new Error("Seat block qilib bo‘lmadi");
+    err.code = "SEAT_NOT_AVAILABLE";
+    throw err;
   }
+
   await repo.recalcTripAvailableSeats(tripId);
   return await exports.getTripDetails(tripId);
 };
 
 exports.unblockSeat = async ({ tripId, seatNo, driverId }) => {
+  // ✅ Sizning mantiq: haydovchi o'z tripida block joyni ochib qo'ya oladi (saqlanadi)
   await assertDriver(tripId, driverId);
+
   const { data: updated, error } = await repo.unblockSeatByDriver({ tripId, seatNo });
   if (error) throw error;
   if (!updated) throw new Error("Seat unblock qilib bo‘lmadi");
+
   await repo.recalcTripAvailableSeats(tripId);
   return await exports.getTripDetails(tripId);
 };
