@@ -121,7 +121,7 @@ async function loadPublicProfilesMap(userIds) {
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
-    .in('user_id', ids);
+    .in('id', ids);
 
   if (error) {
     console.error("profiles load error:", error.message);
