@@ -231,7 +231,7 @@ exports.unblockSeatByDriver = async ({ tripId, seatNo }) => {
     .eq('trip_id', tripId)
     .eq('seat_no', seatNo)
     .eq('status', 'blocked')
-    .eq('status', 'pending')
+    .eq('locked_by_driver', true)
     .select()
     .maybeSingle();
   return { data, error };
