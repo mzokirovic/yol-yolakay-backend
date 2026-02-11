@@ -236,3 +236,35 @@ exports.unblockSeatByDriver = async ({ tripId, seatNo }) => {
     .maybeSingle();
   return { data, error };
 };
+
+
+ exports.autoRejectAllPendingSeats = async (tripId) => {
+   const { error } = await supabase
+     .from('trip_seats')
+     .update({ status: 'available', holder_client_id: null, holder_name: null })
+     .eq('trip_id', tripId)
+     .eq('status', 'pending');
+   return { error };
+ };
+
+ exports.markTripInProgress = async (tripId) => {
+   const { data, error } = await supabase
+     .from('trips')
+     .update({ status: 'in_progress', started_at: new Date().toISOString() })
+     .eq('id', tripId)
+     .eq('status', 'active')
+     .select()
+     .maybeSingle();
+   return { data, error };
+ };
+
+ exports.markTripFinished = async (tripId) => {
+   const { data, error } = await supabase
+     .from('trips')
+     .update({ status: 'finished', ended_at: new Date().toISOString() })
+     .eq('id', tripId)
+     .eq('status', 'in_progress')
+     .select()
+     .maybeSingle();
+   return { data, error };
+ };

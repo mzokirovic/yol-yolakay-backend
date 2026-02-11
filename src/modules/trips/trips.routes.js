@@ -23,6 +23,11 @@ router.post('/:id/seats/:seatNo/cancel', requireAuth, controller.cancelRequest);
 router.post('/:id/seats/:seatNo/approve', requireAuth, controller.approveSeat);
 router.post('/:id/seats/:seatNo/reject', requireAuth, controller.rejectSeat);
 
+// Lifecycle
+router.post('/:id/start', requireAuth, controller.startTrip);
+router.post('/:id/finish', requireAuth, controller.finishTrip);
+
+
 // Public (dynamic) - eng oxirida
 router.get('/:id', optionalAuth, controller.getTripDetails);
 

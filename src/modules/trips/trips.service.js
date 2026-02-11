@@ -388,3 +388,44 @@ exports.unblockSeat = async ({ tripId, seatNo, driverId }) => {
   await repo.recalcTripAvailableSeats(tripId);
   return await exports.getTripDetails(tripId, driverId); // ✅ viewerId
 };
+
+
+
+
+exports.startTrip = async ({ tripId, driverId }) => {
+  const trip = await assertDriver(tripId, driverId);
+
+  if (trip.status !== 'active') {
+    const err = new Error("Safar allaqachon boshlangan yoki tugagan.");
+    err.code = "INVALID_STATE";
+    throw err;
+  }
+
+  // ✅ pending'larni avto reject (MVP)
+  await repo.autoRejectAllPendingSeats(tripId);
+
+  // ✅ trip status start
+  const { error } = await repo.markTripInProgress(tripId);
+  if (error) throw error;
+
+  // ✅ ixtiyoriy: booked yo‘lovchilarga notif
+  // (hozircha xohlasangiz keyin qo‘shamiz)
+
+  return await exports.getTripDetails(tripId, driverId);
+};
+
+exports.finishTrip = async ({ tripId, driverId }) => {
+  const trip = await assertDriver(tripId, driverId);
+
+  if (trip.status !== 'in_progress') {
+    const err = new Error("Safar hali boshlanmagan yoki allaqachon tugagan.");
+    err.code = "INVALID_STATE";
+    throw err;
+  }
+
+  const { error } = await repo.markTripFinished(tripId);
+  if (error) throw error;
+
+  return await exports.getTripDetails(tripId, driverId);
+};
+

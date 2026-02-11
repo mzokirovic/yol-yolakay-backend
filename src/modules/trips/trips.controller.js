@@ -213,3 +213,34 @@ exports.unblockSeat = async (req, res) => {
     return res.status(500).json({ success: false, error: { message: e.message } });
   }
 };
+
+
+exports.startTrip = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+    const data = await tripService.startTrip({ tripId: id, driverId: userId });
+    return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
+  } catch (e) {
+    const code =
+      e.code === "FORBIDDEN" ? 403 :
+      e.code === "INVALID_STATE" ? 409 :
+      500;
+    return res.status(code).json({ success: false, error: { message: e.message } });
+  }
+};
+
+exports.finishTrip = async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+    const data = await tripService.finishTrip({ tripId: id, driverId: userId });
+    return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
+  } catch (e) {
+    const code =
+      e.code === "FORBIDDEN" ? 403 :
+      e.code === "INVALID_STATE" ? 409 :
+      500;
+    return res.status(code).json({ success: false, error: { message: e.message } });
+  }
+};
