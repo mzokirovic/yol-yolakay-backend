@@ -34,13 +34,16 @@ exports.getTripById = async (id) => {
 };
 
 // Qidiruv (Search)
+// Qidiruv (Search)
 exports.searchTrips = async ({ from, to, date, passengers }) => {
   let query = supabase
     .from('trips')
     .select('*')
-    .eq('status', 'active') // Faqat aktivlari
-    query = query.gte('departure_time', new Date().toISOString());
-    .order('departure_time', { ascending: true }); // Vaqt bo'yicha
+    .eq('status', 'active')
+    .order('departure_time', { ascending: true });
+
+  // ✅ Faqat hozirdan keyingi safarlar (MVP)
+  query = query.gte('departure_time', new Date().toISOString());
 
   if (from) query = query.ilike('from_city', `%${from}%`);
   if (to) query = query.ilike('to_city', `%${to}%`);
@@ -58,6 +61,7 @@ exports.searchTrips = async ({ from, to, date, passengers }) => {
   const { data, error } = await query;
   return { data, error };
 };
+
 
 // Mening sayohatlarim (Haydovchi va Yo'lovchi sifatida)
 exports.getUserTrips = async (userId) => {
