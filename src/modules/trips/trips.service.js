@@ -48,14 +48,25 @@ function assertTripEditable(trip) {
     err.code = "NOT_FOUND";
     throw err;
   }
-  // MVP: seatlar faqat active paytida o'zgaradi
+
+  // 1) Status bo‘yicha
   if (trip.status !== 'active') {
     const err = new Error("Safar boshlangan yoki tugagan. Joylar endi o‘zgarmaydi.");
     err.code = "INVALID_STATE";
     throw err;
   }
-}
 
+  // 2) Vaqt bo‘yicha (departure o‘tib ketgan bo‘lsa ham lock)
+  const dep = trip.departure_time || trip.departureTime;
+  if (dep) {
+    const depMs = new Date(dep).getTime();
+    if (Number.isFinite(depMs) && Date.now() >= depMs) {
+      const err = new Error("Safar vaqti o‘tib ketgan. Endi joylar o‘zgarmaydi.");
+      err.code = "INVALID_STATE";
+      throw err;
+    }
+  }
+}
 
 
 async function getDriverInfo(userId) {
@@ -436,24 +447,42 @@ exports.startTrip = async ({ tripId, driverId }) => {
     throw err;
   }
 
-  // ✅ pending'larni avto reject (MVP)
-  await repo.autoRejectAllPendingSeats(tripId);
+  // ✅ 1) Vaqt tekshiruvi: departure_time kelmasdan start bo‘lmasin
+  const dep = trip.departure_time || trip.departureTime;
+  if (dep) {
+    const depMs = new Date(dep).getTime();
+    if (Number.isFinite(depMs) && Date.now() < depMs) {
+      const err = new Error("Safar vaqti hali kelmagan. Belgilangan vaqtda boshlang.");
+      err.code = "INVALID_STATE";
+      throw err;
+    }
+  }
 
-  // ✅ trip status start
-  const { data, error } = await repo.markTripInProgress(tripId);
-  if (error) throw error;
-  if (!data) {
+  // ✅ 2) Avval trip statusni in_progress qilamiz (race condition kamayadi)
+  const { data: started, error: eStart } = await repo.markTripInProgress(tripId);
+  if (eStart) throw eStart;
+  if (!started) {
     const err = new Error("Trip status o'zgarmadi (active emas).");
     err.code = "INVALID_STATE";
     throw err;
   }
 
+  // ✅ 3) pending’larni avto reject (MVP)
+  const { error: eRej } = await repo.autoRejectAllPendingSeats(tripId);
+  if (eRej) throw eRej;
 
-  // ✅ ixtiyoriy: booked yo‘lovchilarga notif
-  // (hozircha xohlasangiz keyin qo‘shamiz)
+  // ✅ 4) Start paytida qolgan available seatlar lock bo‘lsin (blocked)
+  const { error: eLock } = await repo.lockAllAvailableSeatsOnStart(tripId);
+  if (eLock) throw eLock;
+
+  // ✅ 5) available_seats qayta hisob (endi 0 bo‘ladi)
+  const { error: eRecalc } = await repo.recalcTripAvailableSeats(tripId);
+  if (eRecalc) throw eRecalc;
 
   return await exports.getTripDetails(tripId, driverId);
 };
+
+
 
 exports.finishTrip = async ({ tripId, driverId }) => {
   const trip = await assertDriver(tripId, driverId);

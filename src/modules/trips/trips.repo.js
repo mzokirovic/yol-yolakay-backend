@@ -39,6 +39,7 @@ exports.searchTrips = async ({ from, to, date, passengers }) => {
     .from('trips')
     .select('*')
     .eq('status', 'active') // Faqat aktivlari
+    query = query.gte('departure_time', new Date().toISOString());
     .order('departure_time', { ascending: true }); // Vaqt bo'yicha
 
   if (from) query = query.ilike('from_city', `%${from}%`);
@@ -268,3 +269,21 @@ exports.unblockSeatByDriver = async ({ tripId, seatNo }) => {
      .maybeSingle();
    return { data, error };
  };
+
+// ✅ Start bo‘lganda qolgan available seatlarni lock qilish (blocked)
+// in_progress bo‘lgach ham seat actionlar service’da bloklanadi.
+exports.lockAllAvailableSeatsOnStart = async (tripId) => {
+  const { error } = await supabase
+    .from('trip_seats')
+    .update({
+      status: 'blocked',
+      locked_by_driver: true,
+      holder_client_id: null,
+      holder_name: null
+    })
+    .eq('trip_id', tripId)
+    .eq('status', 'available');
+
+  return { error };
+};
+
