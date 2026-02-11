@@ -23,6 +23,14 @@ function parseSeatNo(seatNo) {
   return seat;
 }
 
+function mapErrorStatus(e) {
+  if (e.code === "FORBIDDEN") return 403;
+  if (e.code === "INVALID_STATE") return 409;
+  if (e.code === "SEAT_NOT_AVAILABLE") return 409;
+  return e.statusCode || 500;
+}
+
+
 function isNil(v) { return v === null || v === undefined; }
 
 // ---------------- CONTROLLERS ----------------
@@ -37,9 +45,9 @@ exports.calculatePricePreview = async (req, res) => {
     const dist = pricingService.calculateDistance(fromLat, fromLng, toLat, toLng);
     const pricing = pricingService.calculateTripPrice(dist);
     return res.status(200).json({ success: true, ...pricing });
-  } catch (e) {
-    return res.status(500).json({ success: false, error: { message: e.message } });
-  }
+    } catch (e) {
+      return res.status(mapErrorStatus(e)).json({ success: false, error: { message: e.message } });
+    }
 };
 
 exports.getPopularPoints = async (req, res) => {
