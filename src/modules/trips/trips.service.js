@@ -444,29 +444,24 @@ exports.unblockSeat = async ({ tripId, seatNo, driverId }) => {
 };
 
 
-
 exports.startTrip = async ({ tripId, driverId }) => {
   const trip = await assertDriver(tripId, driverId);
 
-  exports.startTrip = async ({ tripId, driverId }) => {
-    const trip = await assertDriver(tripId, driverId);
+  // ✅ Idempotent start: 2 marta bossayam "bug" chiqarmaymiz
+  if (trip.status === 'in_progress') {
+    return await exports.getTripDetails(tripId, driverId);
+  }
+  if (trip.status === 'finished') {
+    const err = new Error("Safar tugagan. Qayta boshlab bo‘lmaydi.");
+    err.code = "INVALID_STATE";
+    throw err;
+  }
 
-    // ✅ Idempotent start: 2 marta bossayam "bug" chiqarmaymiz
-    if (trip.status === 'in_progress') {
-      return await exports.getTripDetails(tripId, driverId);
-    }
-    if (trip.status === 'finished') {
-      const err = new Error("Safar tugagan. Qayta boshlab bo‘lmaydi.");
-      err.code = "INVALID_STATE";
-      throw err;
-    }
-
-    // Endi faqat 'active' bo‘lsa davom etamiz
-    if (trip.status !== 'active') {
-      const err = new Error("Safar allaqachon boshlangan yoki tugagan.");
-      err.code = "INVALID_STATE";
-      throw err;
-    }
+  if (trip.status !== 'active') {
+    const err = new Error("Safar allaqachon boshlangan yoki tugagan.");
+    err.code = "INVALID_STATE";
+    throw err;
+  }
 
   // ✅ 1) Vaqt tekshiruvi: departure_time kelmasdan start bo‘lmasin
   const dep = trip.departure_time || trip.departureTime;
@@ -479,10 +474,19 @@ exports.startTrip = async ({ tripId, driverId }) => {
     }
   }
 
-  // ✅ 2) Avval trip statusni in_progress qilamiz (race condition kamayadi)
+  // ✅ 2) Avval trip statusni in_progress qilamiz
   const { data: started, error: eStart } = await repo.markTripInProgress(tripId);
   if (eStart) throw eStart;
+
   if (!started) {
+    // race: boshqa joy start qilib yuborgan bo‘lishi mumkin
+    const { data: freshTrip, error: eFresh } = await repo.getTripById(tripId);
+    if (eFresh) throw eFresh;
+
+    if (freshTrip?.status === 'in_progress') {
+      return await exports.getTripDetails(tripId, driverId);
+    }
+
     const err = new Error("Trip status o'zgarmadi (active emas).");
     err.code = "INVALID_STATE";
     throw err;
@@ -492,11 +496,11 @@ exports.startTrip = async ({ tripId, driverId }) => {
   const { error: eRej } = await repo.autoRejectAllPendingSeats(tripId);
   if (eRej) throw eRej;
 
-  // ✅ 4) Start paytida qolgan available seatlar lock bo‘lsin (blocked)
+  // ✅ 4) qolgan available seatlar lock bo‘lsin (blocked)
   const { error: eLock } = await repo.lockAllAvailableSeatsOnStart(tripId);
   if (eLock) throw eLock;
 
-  // ✅ 5) available_seats qayta hisob (endi 0 bo‘ladi)
+  // ✅ 5) available_seats qayta hisob
   const { error: eRecalc } = await repo.recalcTripAvailableSeats(tripId);
   if (eRecalc) throw eRecalc;
 

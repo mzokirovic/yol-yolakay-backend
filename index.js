@@ -3,7 +3,7 @@
 console.log("✅ BOOT FILE:", __filename);
 
 require('dotenv').config();
-const tripLifecycleJob = require('./src/jobs/tripLifecycleJob');
+const tripLifecycleJob = require('./src/jobs/tripLifecycle.job');
 const express = require('express');
 const cors = require('cors');
 
