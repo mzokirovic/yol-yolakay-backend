@@ -134,13 +134,14 @@ exports.getMyTrips = async (req, res) => {
 exports.getTripDetails = async (req, res) => {
   try {
     const { id } = req.params;
-    const viewerId = req.user?.id || null;           // ✅ NEW
-    const data = await tripService.getTripDetails(id, viewerId); // ✅ NEW
+    const viewerId = req.user?.id || null;
+    const data = await tripService.getTripDetails(id, viewerId);
     return res.status(200).json({ success: true, trip: data.trip, seats: data.seats });
   } catch (e) {
-    return res.status(500).json({ success: false, error: { message: e.message } });
+    return res.status(mapErrorStatus(e)).json({ success: false, error: { message: e.message } });
   }
 };
+
 
 // Seat actions
 exports.requestSeat = async (req, res) => {

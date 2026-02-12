@@ -42,31 +42,34 @@ async function assertDriver(tripId, driverId) {
 }
 
 
-function assertTripEditable(trip) {
+function assertTripActive(trip) {
   if (!trip) {
     const err = new Error("Trip topilmadi");
     err.code = "NOT_FOUND";
     throw err;
   }
-
-  // 1) Status bo‘yicha
   if (trip.status !== 'active') {
     const err = new Error("Safar boshlangan yoki tugagan. Joylar endi o‘zgarmaydi.");
     err.code = "INVALID_STATE";
     throw err;
   }
+}
 
-  // 2) Vaqt bo‘yicha (departure o‘tib ketgan bo‘lsa ham lock)
+// ✅ Faqat YANGI booking (request) uchun: departure_time o'tgan bo'lsa yopamiz
+function assertBookingOpen(trip) {
+  assertTripActive(trip);
+
   const dep = trip.departure_time || trip.departureTime;
-  if (dep) {
-    const depMs = new Date(dep).getTime();
-    if (Number.isFinite(depMs) && Date.now() >= depMs) {
-      const err = new Error("Safar vaqti o‘tib ketgan. Endi joylar o‘zgarmaydi.");
-      err.code = "INVALID_STATE";
-      throw err;
-    }
+  if (!dep) return;
+
+  const depMs = new Date(dep).getTime();
+  if (Number.isFinite(depMs) && Date.now() >= depMs) {
+    const err = new Error("Safar vaqti o‘tib ketgan. Endi yangi bron qilib bo‘lmaydi.");
+    err.code = "INVALID_STATE";
+    throw err;
   }
 }
+
 
 
 async function getDriverInfo(userId) {
@@ -285,7 +288,7 @@ exports.requestSeat = async ({ tripId, seatNo, clientId, holderName }) => {
   const { data: trip, error: eTrip } = await repo.getTripById(tripId);
   if (eTrip) throw eTrip;
 
-  assertTripEditable(trip);
+  assertBookingOpen(trip);
 
   if (trip?.driver_id && String(trip.driver_id) === String(clientId)) {
     const err = new Error("Haydovchi o'z safarida joy band qila olmaydi.");
@@ -321,7 +324,7 @@ exports.cancelRequest = async ({ tripId, seatNo, clientId }) => {
   const { data: trip, error: eTrip } = await repo.getTripById(tripId);
   if (eTrip) throw eTrip;
 
-  assertTripEditable(trip); // ✅ NEW
+  assertTripActive(trip);
 
   const { error } = await repo.cancelRequest({ tripId, seatNo, clientId });
   if (error) throw error;
@@ -343,7 +346,8 @@ exports.cancelRequest = async ({ tripId, seatNo, clientId }) => {
 
 exports.approveSeat = async ({ tripId, seatNo, driverId }) => {
   const trip = await assertDriver(tripId, driverId); // ✅ trip qaytaradi
-  assertTripEditable(trip);                          // ✅ NEW
+  assertTripActive(trip);
+
 
   const { data: seatsBefore } = await repo.getTripSeats(tripId);
   const sNo = parseInt(seatNo, 10);
@@ -376,7 +380,8 @@ exports.approveSeat = async ({ tripId, seatNo, driverId }) => {
 
 exports.rejectSeat = async ({ tripId, seatNo, driverId }) => {
   const trip = await assertDriver(tripId, driverId);
-  assertTripEditable(trip); // ✅ NEW
+  assertTripActive(trip);
+
 
   const { data: seatsBefore } = await repo.getTripSeats(tripId);
   const sNo = parseInt(seatNo, 10);
@@ -403,7 +408,8 @@ exports.rejectSeat = async ({ tripId, seatNo, driverId }) => {
 
 exports.blockSeat = async ({ tripId, seatNo, driverId }) => {
   const trip = await assertDriver(tripId, driverId);
-  assertTripEditable(trip); // ✅ NEW
+  assertTripActive(trip);
+
 
   const { data: updated, error } = await repo.blockSeatByDriver({ tripId, seatNo });
   if (error) throw error;
@@ -421,7 +427,8 @@ exports.blockSeat = async ({ tripId, seatNo, driverId }) => {
 
 exports.unblockSeat = async ({ tripId, seatNo, driverId }) => {
   const trip = await assertDriver(tripId, driverId);
-  assertTripEditable(trip); // ✅ NEW
+  assertTripActive(trip);
+
 
   const { data: updated, error } = await repo.unblockSeatByDriver({ tripId, seatNo });
   if (error) throw error;
