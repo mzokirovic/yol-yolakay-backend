@@ -15,7 +15,11 @@ function maskToken(t) {
 module.exports = async function requireAuth(req, res, next) {
   try {
     const token = extractToken(req);
-    if (!token) return res.status(401).json({ success: false, error: "AUTH_REQUIRED" });
+    if (!token) return res.status(401).json({
+                  success: false,
+                  error: { message: "AUTH_REQUIRED" },
+                  message: "AUTH_REQUIRED"
+                });
 
     // ✅ DEBUG: token formatini ko‘ramiz (JWT bo‘lsa dots=2 chiqadi)
     if ((process.env.DEBUG_AUTH || '').toLowerCase() === 'true') {
@@ -30,7 +34,11 @@ module.exports = async function requireAuth(req, res, next) {
     }
 
     if (error || !data?.user) {
-      return res.status(401).json({ success: false, error: "INVALID_TOKEN" });
+      return res.status(401).json({
+        success: false,
+        error: { message: "INVALID_TOKEN" },
+        message: "INVALID_TOKEN"
+      });
     }
 
     req.user = data.user;
