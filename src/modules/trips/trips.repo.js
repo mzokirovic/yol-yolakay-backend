@@ -290,3 +290,19 @@ exports.lockAllAvailableSeatsOnStart = async (tripId) => {
   return { error };
 };
 
+
+// ✅ Auto-start uchun: vaqt o‘tib ketgan active triplar
+exports.listTripsDueForAutoStart = async ({ thresholdIso, minIso, limit = 50 }) => {
+  const { data, error } = await supabase
+    .from('trips')
+    .select('id, driver_id, departure_time, status')
+    .eq('status', 'active')
+    // departure_time <= now - grace
+    .lte('departure_time', thresholdIso)
+    // juda eski triplarni “tiriltirib yubormaslik” uchun (masalan, 24h)
+    .gte('departure_time', minIso)
+    .order('departure_time', { ascending: true })
+    .limit(limit);
+
+  return { data, error };
+};

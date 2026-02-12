@@ -3,6 +3,7 @@
 console.log("✅ BOOT FILE:", __filename);
 
 require('dotenv').config();
+const tripLifecycleJob = require('./src/jobs/tripLifecycleJob');
 const express = require('express');
 const cors = require('cors');
 
@@ -55,4 +56,7 @@ app.use((err, req, res, next) => {
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Senior Server running on port ${PORT}`);
+
+    // ✅ AUTO-START scheduler
+    tripLifecycleJob.start();
 });

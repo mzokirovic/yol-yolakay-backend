@@ -448,11 +448,25 @@ exports.unblockSeat = async ({ tripId, seatNo, driverId }) => {
 exports.startTrip = async ({ tripId, driverId }) => {
   const trip = await assertDriver(tripId, driverId);
 
-  if (trip.status !== 'active') {
-    const err = new Error("Safar allaqachon boshlangan yoki tugagan.");
-    err.code = "INVALID_STATE";
-    throw err;
-  }
+  exports.startTrip = async ({ tripId, driverId }) => {
+    const trip = await assertDriver(tripId, driverId);
+
+    // ✅ Idempotent start: 2 marta bossayam "bug" chiqarmaymiz
+    if (trip.status === 'in_progress') {
+      return await exports.getTripDetails(tripId, driverId);
+    }
+    if (trip.status === 'finished') {
+      const err = new Error("Safar tugagan. Qayta boshlab bo‘lmaydi.");
+      err.code = "INVALID_STATE";
+      throw err;
+    }
+
+    // Endi faqat 'active' bo‘lsa davom etamiz
+    if (trip.status !== 'active') {
+      const err = new Error("Safar allaqachon boshlangan yoki tugagan.");
+      err.code = "INVALID_STATE";
+      throw err;
+    }
 
   // ✅ 1) Vaqt tekshiruvi: departure_time kelmasdan start bo‘lmasin
   const dep = trip.departure_time || trip.departureTime;
@@ -494,6 +508,11 @@ exports.startTrip = async ({ tripId, driverId }) => {
 exports.finishTrip = async ({ tripId, driverId }) => {
   const trip = await assertDriver(tripId, driverId);
 
+  // ✅ idempotent: allaqachon finished bo‘lsa error bermaymiz
+  if (trip.status === 'finished') {
+    return await exports.getTripDetails(tripId, driverId);
+  }
+
   if (trip.status !== 'in_progress') {
     const err = new Error("Safar hali boshlanmagan yoki allaqachon tugagan.");
     err.code = "INVALID_STATE";
@@ -502,13 +521,22 @@ exports.finishTrip = async ({ tripId, driverId }) => {
 
   const { data, error } = await repo.markTripFinished(tripId);
   if (error) throw error;
+
   if (!data) {
+    // race: auto-finish yoki boshqa joy tugatib yuborgan bo‘lishi mumkin
+    const { data: freshTrip, error: eFresh } = await repo.getTripById(tripId);
+    if (eFresh) throw eFresh;
+
+    if (freshTrip?.status === 'finished') {
+      return await exports.getTripDetails(tripId, driverId);
+    }
+
     const err = new Error("Trip status o'zgarmadi (in_progress emas).");
     err.code = "INVALID_STATE";
     throw err;
   }
 
-
   return await exports.getTripDetails(tripId, driverId);
 };
+
 
