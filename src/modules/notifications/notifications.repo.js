@@ -55,6 +55,15 @@ async function listDeviceTokens(userId) {
     .eq('user_id', userId);
 }
 
+async function deleteDeviceToken(userId, token) {
+  return supabase
+    .from('device_tokens')
+    .delete()
+    .eq('user_id', userId)
+    .eq('token', token);
+}
+
+
 module.exports = {
   listByUser,
   markRead,
@@ -62,4 +71,5 @@ module.exports = {
   createNotification,
   upsertDeviceToken,
   listDeviceTokens,
+  deleteDeviceToken
 };

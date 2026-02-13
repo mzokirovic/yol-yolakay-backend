@@ -36,7 +36,7 @@ app.use('/api/inbox', inboxRoutes);
 const notificationsRoutes = require('./src/modules/notifications/notifications.routes');
 app.use('/api/notifications', notificationsRoutes);
 
-// 5. ✅ AUTH (TUZATILDI: TEPAGA OLIB CHIQILDI)
+// 5. ✅ AUTH
 const authRoutes = require('./src/modules/auth/auth.routes');
 app.use('/api/auth', authRoutes);
 
@@ -50,13 +50,21 @@ app.get('/', (req, res) => {
 app.use((err, req, res, next) => {
   const code = err.statusCode || err.status || 500;
   console.error("SERVER_ERROR:", err);
-  res.status(code).json({ success:false, error: err.message || "Server ichki xatosi" });
+  res.status(code).json({ success: false, error: err.message || "Server ichki xatosi" });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 Senior Server running on port ${PORT}`);
 
-    // ✅ AUTO-START scheduler
+  // ✅ AUTO-START scheduler (env bilan boshqaramiz)
+  // Prod’da 2+ instance bo‘lib qolsa, job 2 marta yurib ketmasin.
+  const enabled = String(process.env.ENABLE_TRIP_LIFECYCLE_JOB || "").toLowerCase() === "true";
+
+  if (enabled) {
     tripLifecycleJob.start();
+    console.log("✅ tripLifecycleJob enabled (ENABLE_TRIP_LIFECYCLE_JOB=true)");
+  } else {
+    console.log("ℹ️ tripLifecycleJob disabled (set ENABLE_TRIP_LIFECYCLE_JOB=true to enable)");
+  }
 });

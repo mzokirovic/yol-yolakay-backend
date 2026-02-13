@@ -1,27 +1,49 @@
 // src/modules/trips/trips.service.js
 
 const repo = require('./trips.repo');
-const notifRepo = require('../notifications/notifications.repo');
 const pricingService = require('./pricing.service');
 const profileService = require('../profile/profile.service');
 const supabase = require('../../core/db/supabase'); // ✅ kerak
-const { sendToToken } = require('../../core/fcm');
+const notificationsService = require('../notifications/notifications.service');
 
 // --- HELPER FUNCTIONS ---
 
 async function notifyUser(userId, title, body, type, data = {}) {
   try {
     if (!userId) return;
-    const { data: tokens } = await notifRepo.listDeviceTokens(userId);
-    if (!tokens || tokens.length === 0) return;
-
-    const payload = { title, body, type, ...data };
-    const promises = tokens.map(t => sendToToken(t.token, payload));
-    await Promise.allSettled(promises);
-    console.log(`🔔 Notification sent to ${userId}: ${title}`);
+    await notificationsService.createAndPush(userId, title, body, type, data);
+    console.log(`🔔 Notification created+sent to ${userId}: ${title}`);
   } catch (e) {
     console.error(`⚠️ Notification error for ${userId}:`, e.message);
   }
+}
+
+function uniqIds(list) {
+  return [...new Set((list || []).map(String).filter(Boolean))];
+}
+
+async function listBookedPassengerIds(tripId) {
+  const { data, error } = await supabase
+    .from('trip_seats')
+    .select('holder_client_id')
+    .eq('trip_id', tripId)
+    .eq('status', 'booked');
+
+  if (error) {
+    console.error("booked seats load error:", error.message);
+    return [];
+  }
+
+  return uniqIds((data || []).map(x => x.holder_client_id));
+}
+
+async function notifyBookedPassengers(tripId, title, body, type, data = {}) {
+  const ids = await listBookedPassengerIds(tripId);
+  if (!ids.length) return;
+
+  await Promise.allSettled(
+    ids.map(uid => notifyUser(uid, title, body, type, { trip_id: String(tripId), ...data }))
+  );
 }
 
 async function assertDriver(tripId, driverId) {
@@ -40,7 +62,6 @@ async function assertDriver(tripId, driverId) {
   }
   return trip;
 }
-
 
 function assertTripActive(trip) {
   if (!trip) {
@@ -69,8 +90,6 @@ function assertBookingOpen(trip) {
     throw err;
   }
 }
-
-
 
 async function getDriverInfo(userId) {
   const profile = await profileService.getOrCreateProfile(userId);
@@ -162,9 +181,9 @@ async function loadPublicProfilesMap(userIds) {
   const map = {};
   for (const p of data || []) {
     map[p.id] = {
-      user_id: p.id,                           // ✅ snake_case
-      display_name: pickDisplayName(p),        // ✅ snake_case
-      avatar_url: pickAvatarUrl(p),            // ✅ snake_case
+      user_id: p.id,
+      display_name: pickDisplayName(p),
+      avatar_url: pickAvatarUrl(p),
       rating: pickRating(p),
     };
   }
@@ -175,7 +194,6 @@ async function enrichSeatsWithHolderProfiles(seatsRaw, trip, viewerId) {
   const driverId = trip?.driver_id ? String(trip.driver_id) : null;
   const isDriver = viewerId && driverId && String(viewerId) === driverId;
 
-  // Faqat ko‘rsatishga ruxsat bo‘lgan seatlar uchun profile yuklaymiz
   const idsToLoad = (seatsRaw || [])
     .filter(s => canExposeProfile(s, viewerId, isDriver))
     .map(s => s.holder_client_id)
@@ -192,9 +210,9 @@ async function enrichSeatsWithHolderProfiles(seatsRaw, trip, viewerId) {
 
     return {
       ...s,
-      holder_client_id: exposeId ? s.holder_client_id : null,           // ✅ privacy
-      holder_name: exposeProfile ? s.holder_name : null,                // ✅ privacy (pending)
-      holder_profile: profile                                           // ✅ Android parse qiladi
+      holder_client_id: exposeId ? s.holder_client_id : null,
+      holder_name: exposeProfile ? s.holder_name : null,
+      holder_profile: profile
     };
   });
 }
@@ -270,7 +288,7 @@ exports.getUserTrips = async (userId) => {
   return await repo.getUserTrips(userId);
 };
 
-// ✅ viewerId optional (optionalAuth bilan keladi)
+// ✅ viewerId optional
 exports.getTripDetails = async (tripId, viewerId = null) => {
   const { data: trip, error: e1 } = await repo.getTripById(tripId);
   if (e1) throw e1;
@@ -307,14 +325,14 @@ exports.requestSeat = async ({ tripId, seatNo, clientId, holderName }) => {
 
   await repo.recalcTripAvailableSeats(tripId);
 
-  const result = await exports.getTripDetails(tripId, clientId); // ✅ viewerId
+  const result = await exports.getTripDetails(tripId, clientId);
   if (result.trip && result.trip.driver_id) {
     await notifyUser(
       result.trip.driver_id,
       "Yangi buyurtma! 🚖",
       `${holderName || "Bir yo'lovchi"} joy band qilmoqchi.`,
       "TRIP_REQUEST",
-      { trip_id: tripId, seat_no: String(seatNo) }
+      { trip_id: String(tripId), seat_no: String(seatNo) }
     );
   }
   return result;
@@ -331,23 +349,22 @@ exports.cancelRequest = async ({ tripId, seatNo, clientId }) => {
 
   await repo.recalcTripAvailableSeats(tripId);
 
-  const result = await exports.getTripDetails(tripId, clientId); // ✅ viewerId
+  const result = await exports.getTripDetails(tripId, clientId);
   if (result.trip && result.trip.driver_id) {
     await notifyUser(
       result.trip.driver_id,
       "Buyurtma bekor qilindi ⚠️",
       "Yo'lovchi joy so'rovini bekor qildi.",
       "TRIP_CANCELLED",
-      { trip_id: tripId, seat_no: String(seatNo) }
+      { trip_id: String(tripId), seat_no: String(seatNo) }
     );
   }
   return result;
 };
 
 exports.approveSeat = async ({ tripId, seatNo, driverId }) => {
-  const trip = await assertDriver(tripId, driverId); // ✅ trip qaytaradi
+  const trip = await assertDriver(tripId, driverId);
   assertTripActive(trip);
-
 
   const { data: seatsBefore } = await repo.getTripSeats(tripId);
   const sNo = parseInt(seatNo, 10);
@@ -370,24 +387,22 @@ exports.approveSeat = async ({ tripId, seatNo, driverId }) => {
       "So'rovingiz qabul qilindi! ✅",
       "Haydovchi buyurtmangizni tasdiqladi.",
       "TRIP_APPROVED",
-      { trip_id: tripId, seat_no: String(seatNo) }
+      { trip_id: String(tripId), seat_no: String(seatNo) }
     );
   }
 
   return await exports.getTripDetails(tripId, driverId);
 };
 
-
 exports.rejectSeat = async ({ tripId, seatNo, driverId }) => {
   const trip = await assertDriver(tripId, driverId);
   assertTripActive(trip);
-
 
   const { data: seatsBefore } = await repo.getTripSeats(tripId);
   const sNo = parseInt(seatNo, 10);
   const targetSeat = seatsBefore?.find(s => s.seat_no === sNo);
 
-  const { data: updated, error } = await repo.rejectSeat({ tripId, seatNo });
+  const { error } = await repo.rejectSeat({ tripId, seatNo });
   if (error) throw error;
 
   await repo.recalcTripAvailableSeats(tripId);
@@ -398,18 +413,16 @@ exports.rejectSeat = async ({ tripId, seatNo, driverId }) => {
       "So'rovingiz rad etildi ❌",
       "Afsuski, haydovchi buyurtmani qabul qilmadi.",
       "TRIP_REJECTED",
-      { trip_id: tripId, seat_no: String(seatNo) }
+      { trip_id: String(tripId), seat_no: String(seatNo) }
     );
   }
 
   return await exports.getTripDetails(tripId, driverId);
 };
 
-
 exports.blockSeat = async ({ tripId, seatNo, driverId }) => {
   const trip = await assertDriver(tripId, driverId);
   assertTripActive(trip);
-
 
   const { data: updated, error } = await repo.blockSeatByDriver({ tripId, seatNo });
   if (error) throw error;
@@ -424,11 +437,9 @@ exports.blockSeat = async ({ tripId, seatNo, driverId }) => {
   return await exports.getTripDetails(tripId, driverId);
 };
 
-
 exports.unblockSeat = async ({ tripId, seatNo, driverId }) => {
   const trip = await assertDriver(tripId, driverId);
   assertTripActive(trip);
-
 
   const { data: updated, error } = await repo.unblockSeatByDriver({ tripId, seatNo });
   if (error) throw error;
@@ -443,27 +454,21 @@ exports.unblockSeat = async ({ tripId, seatNo, driverId }) => {
   return await exports.getTripDetails(tripId, driverId);
 };
 
-
 exports.startTrip = async ({ tripId, driverId }) => {
   const trip = await assertDriver(tripId, driverId);
 
-  // ✅ Idempotent start: 2 marta bossayam "bug" chiqarmaymiz
-  if (trip.status === 'in_progress') {
-    return await exports.getTripDetails(tripId, driverId);
-  }
+  if (trip.status === 'in_progress') return await exports.getTripDetails(tripId, driverId);
   if (trip.status === 'finished') {
     const err = new Error("Safar tugagan. Qayta boshlab bo‘lmaydi.");
     err.code = "INVALID_STATE";
     throw err;
   }
-
   if (trip.status !== 'active') {
     const err = new Error("Safar allaqachon boshlangan yoki tugagan.");
     err.code = "INVALID_STATE";
     throw err;
   }
 
-  // ✅ 1) Vaqt tekshiruvi: departure_time kelmasdan start bo‘lmasin
   const dep = trip.departure_time || trip.departureTime;
   if (dep) {
     const depMs = new Date(dep).getTime();
@@ -474,49 +479,44 @@ exports.startTrip = async ({ tripId, driverId }) => {
     }
   }
 
-  // ✅ 2) Avval trip statusni in_progress qilamiz
   const { data: started, error: eStart } = await repo.markTripInProgress(tripId);
   if (eStart) throw eStart;
 
   if (!started) {
-    // race: boshqa joy start qilib yuborgan bo‘lishi mumkin
     const { data: freshTrip, error: eFresh } = await repo.getTripById(tripId);
     if (eFresh) throw eFresh;
-
-    if (freshTrip?.status === 'in_progress') {
-      return await exports.getTripDetails(tripId, driverId);
-    }
+    if (freshTrip?.status === 'in_progress') return await exports.getTripDetails(tripId, driverId);
 
     const err = new Error("Trip status o'zgarmadi (active emas).");
     err.code = "INVALID_STATE";
     throw err;
   }
 
-  // ✅ 3) pending’larni avto reject (MVP)
   const { error: eRej } = await repo.autoRejectAllPendingSeats(tripId);
   if (eRej) throw eRej;
 
-  // ✅ 4) qolgan available seatlar lock bo‘lsin (blocked)
   const { error: eLock } = await repo.lockAllAvailableSeatsOnStart(tripId);
   if (eLock) throw eLock;
 
-  // ✅ 5) available_seats qayta hisob
   const { error: eRecalc } = await repo.recalcTripAvailableSeats(tripId);
   if (eRecalc) throw eRecalc;
+
+  // ✅ booked passenger’larga “trip started”
+  await notifyBookedPassengers(
+    tripId,
+    "Safar boshlandi 🚖",
+    "Haydovchi safarni boshladi.",
+    "TRIP_STARTED",
+    {}
+  );
 
   return await exports.getTripDetails(tripId, driverId);
 };
 
-
-
 exports.finishTrip = async ({ tripId, driverId }) => {
   const trip = await assertDriver(tripId, driverId);
 
-  // ✅ idempotent: allaqachon finished bo‘lsa error bermaymiz
-  if (trip.status === 'finished') {
-    return await exports.getTripDetails(tripId, driverId);
-  }
-
+  if (trip.status === 'finished') return await exports.getTripDetails(tripId, driverId);
   if (trip.status !== 'in_progress') {
     const err = new Error("Safar hali boshlanmagan yoki allaqachon tugagan.");
     err.code = "INVALID_STATE";
@@ -527,20 +527,23 @@ exports.finishTrip = async ({ tripId, driverId }) => {
   if (error) throw error;
 
   if (!data) {
-    // race: auto-finish yoki boshqa joy tugatib yuborgan bo‘lishi mumkin
     const { data: freshTrip, error: eFresh } = await repo.getTripById(tripId);
     if (eFresh) throw eFresh;
-
-    if (freshTrip?.status === 'finished') {
-      return await exports.getTripDetails(tripId, driverId);
-    }
+    if (freshTrip?.status === 'finished') return await exports.getTripDetails(tripId, driverId);
 
     const err = new Error("Trip status o'zgarmadi (in_progress emas).");
     err.code = "INVALID_STATE";
     throw err;
   }
 
+  // ✅ booked passenger’larga “trip finished”
+  await notifyBookedPassengers(
+    tripId,
+    "Safar tugadi ✅",
+    "Safar yakunlandi.",
+    "TRIP_FINISHED",
+    {}
+  );
+
   return await exports.getTripDetails(tripId, driverId);
 };
-
-
