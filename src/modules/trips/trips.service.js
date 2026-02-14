@@ -171,7 +171,7 @@ async function loadPublicProfilesMap(userIds) {
   const { data, error } = await supabase
     .from('profiles')
     .select('*')
-    .in('id', ids);
+    .in('user_id', ids);
 
   if (error) {
     console.error("profiles load error:", error.message);
@@ -180,6 +180,7 @@ async function loadPublicProfilesMap(userIds) {
 
   const map = {};
   for (const p of data || []) {
+  const uid = String(p.user_id);
     map[p.id] = {
       user_id: p.id,
       display_name: pickDisplayName(p),
