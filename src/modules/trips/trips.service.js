@@ -314,6 +314,14 @@ exports.requestSeat = async ({ tripId, seatNo, clientId, holderName }) => {
     throw err;
   }
 
+
+let holderNameFinal = holderName;
+if (!holderNameFinal) {
+  const p = await profileService.getOrCreateProfile(clientId);
+  holderNameFinal = pickDisplayName(p) || "Yo'lovchi";
+}
+
+
   const { data: updated, error } = await repo.requestSeat({ tripId, seatNo, clientId, holderName });
   if (error) throw error;
 

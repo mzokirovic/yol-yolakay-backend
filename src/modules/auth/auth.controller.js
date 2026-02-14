@@ -29,4 +29,13 @@ async function verifyOtp(req, res, next) {
   }
 }
 
-module.exports = { sendOtp, verifyOtp };
+async function refresh(req, res, next) {
+  try {
+    const out = await service.refresh(req);
+    res.json(out);
+  } catch (e) {
+    next(e);
+  }
+}
+
+module.exports = { sendOtp, verifyOtp, refresh };

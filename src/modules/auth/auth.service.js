@@ -134,4 +134,28 @@ async function verifyOtp(req) {
   };
 }
 
-module.exports = { sendOtp, verifyOtp };
+
+async function refresh(req) {
+  const body = req.body || {};
+  const refreshToken = body.refresh_token || body.refreshToken || "";
+
+  if (!refreshToken) throw badRequest("refresh_token required");
+
+  const { data, error } = await supabaseAuth.auth.refreshSession({
+    refresh_token: refreshToken
+  });
+
+  if (error) throw badRequest(`Refresh xatosi: ${error.message}`);
+  if (!data?.session || !data?.user) throw badRequest("Session topilmadi");
+
+  return {
+    success: true,
+    user_id: data.user.id,
+    access_token: data.session.access_token,
+    refresh_token: data.session.refresh_token,
+    is_new_user: false
+  };
+}
+
+module.exports = { sendOtp, verifyOtp, refresh };
+
