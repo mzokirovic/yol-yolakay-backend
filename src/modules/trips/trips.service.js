@@ -181,7 +181,7 @@ async function loadPublicProfilesMap(userIds) {
   const map = {};
   for (const p of data || []) {
   const uid = String(p.user_id);
-    map[p.id] = {
+    map[uid] = {
       user_id: p.id,
       display_name: pickDisplayName(p),
       avatar_url: pickAvatarUrl(p),
@@ -323,7 +323,7 @@ if (!holderNameFinal) {
 }
 
 
-  const { data: updated, error } = await repo.requestSeat({ tripId, seatNo, clientId, holderName });
+  const { data: updated, error } = await repo.requestSeat({ tripId, seatNo, clientId, holderName: holderNameFinal});
   if (error) throw error;
 
   if (!updated) {
@@ -339,7 +339,7 @@ if (!holderNameFinal) {
     await notifyUser(
       result.trip.driver_id,
       "Yangi buyurtma! 🚖",
-      `${holderName || "Bir yo'lovchi"} joy band qilmoqchi.`,
+      `${holderNameFinal || "Bir yo'lovchi"} joy band qilmoqchi.`,
       "TRIP_REQUEST",
       { trip_id: String(tripId), seat_no: String(seatNo) }
     );
