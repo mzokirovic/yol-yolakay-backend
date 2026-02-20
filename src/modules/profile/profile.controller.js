@@ -1,5 +1,3 @@
-// /home/mzokirovic/Desktop/yol-yolakay-backend/src/modules/profile/profile.controller.js
-
 const service = require('./profile.service');
 const supabase = require('../../core/db/supabase');
 
@@ -12,7 +10,6 @@ function getUserId(req) {
   }
   return String(uid);
 }
-
 
 exports.getMe = async (req, res, next) => {
   try {
@@ -41,6 +38,8 @@ exports.updateMe = async (req, res, next) => {
     next(e);
   }
 };
+
+// -------- Compat: single vehicle --------
 
 exports.getMyVehicle = async (req, res, next) => {
   try {
@@ -71,15 +70,25 @@ exports.upsertMyVehicle = async (req, res, next) => {
   }
 };
 
-// ✅ Logdagi xatoni oldini olish uchun bu funksiya aniq bo'lishi shart
-exports.getCarReference = async (req, res, next) => {
+exports.deleteMyVehicle = async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    await service.deleteVehicle(userId);
+    res.json({ ok: true });
+  } catch (e) {
+    next(e);
+  }
+};
+
+// -------- Public reference --------
+
+exports.getCarReference = async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('car_brands')
       .select('id, name, car_models ( id, name )');
 
     if (error) throw error;
-
     return res.status(200).json({ success: true, data });
   } catch (error) {
     console.error("Car Ref Error:", error.message);
@@ -87,36 +96,69 @@ exports.getCarReference = async (req, res, next) => {
   }
 };
 
-// ✅ POST /vehicle marshruti uchun funksiya
+// -------- Legacy POST /vehicle (qoldiramiz, lekin service orqali) --------
 exports.upsertVehicleDirect = async (req, res, next) => {
-    try {
-        const userId = getUserId(req);
-        const b = req.body;
+  try {
+    const userId = getUserId(req);
+    const b = req.body || {};
+    const saved = await service.upsertVehicle(userId, b);
+    return res.status(200).json({ success: true, message: "Mashina saqlandi", data: saved });
+  } catch (e) {
+    next(e);
+  }
+};
 
-        // Validatsiya
-        if (!b.make || !b.model || !b.plate) {
-            return res.status(400).json({ success: false, error: { message: "Mashina ma'lumotlari to'liq emas" } });
-        }
+// -------- NEW: multi vehicles --------
 
-        const vehicleData = {
-            user_id: userId,
-            make: b.make,
-            model: b.model,
-            color: b.color,
-            plate: b.plate,
-            seats: parseInt(b.seats || 4)
-        };
+exports.listMyVehicles = async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const list = await service.listVehicles(userId);
+    res.json({ success: true, data: list });
+  } catch (e) {
+    next(e);
+  }
+};
 
-        const { data, error } = await supabase
-            .from('vehicles')
-            .upsert(vehicleData)
-            .select()
-            .single();
+exports.addMyVehicle = async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const created = await service.addVehicle(userId, req.body || {});
+    res.status(201).json({ success: true, data: created });
+  } catch (e) {
+    next(e);
+  }
+};
 
-        if (error) throw error;
+exports.updateMyVehicleById = async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+    const updated = await service.updateVehicleById(userId, id, req.body || {});
+    res.json({ success: true, data: updated });
+  } catch (e) {
+    next(e);
+  }
+};
 
-        return res.status(200).json({ success: true, message: "Mashina saqlandi", data });
-    } catch (error) {
-        next(error);
-    }
+exports.deleteMyVehicleById = async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+    await service.deleteVehicleById(userId, id);
+    res.json({ success: true });
+  } catch (e) {
+    next(e);
+  }
+};
+
+exports.setMyVehiclePrimary = async (req, res, next) => {
+  try {
+    const userId = getUserId(req);
+    const { id } = req.params;
+    const updated = await service.setPrimaryVehicle(userId, id);
+    res.json({ success: true, data: updated });
+  } catch (e) {
+    next(e);
+  }
 };

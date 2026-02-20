@@ -25,6 +25,8 @@ function mapVehicle(row) {
   };
 }
 
+// -------- Profiles --------
+
 exports.getProfileByUserId = async (userId) => {
   const { data, error } = await supabase
     .from('profiles')
@@ -47,7 +49,9 @@ exports.upsertProfile = async (dbProfile) => {
   return mapProfile(data);
 };
 
-exports.getVehicleByUserId = async (userId) => {
+// -------- SINGLE vehicle table: public.vehicles (compat) --------
+
+async function getVehicleSingleByUserId(userId) {
   const { data, error } = await supabase
     .from('vehicles')
     .select('*')
@@ -56,7 +60,7 @@ exports.getVehicleByUserId = async (userId) => {
 
   if (error) throw error;
   return mapVehicle(data);
-};
+}
 
 exports.upsertVehicle = async (dbVehicle) => {
   const { data, error } = await supabase
@@ -67,4 +71,200 @@ exports.upsertVehicle = async (dbVehicle) => {
 
   if (error) throw error;
   return mapVehicle(data);
+};
+
+exports.deleteVehicleByUserId = async (userId) => {
+  const { error } = await supabase
+    .from('vehicles')
+    .delete()
+    .eq('user_id', userId);
+
+  if (error) throw error;
+  return true;
+};
+
+// -------- MULTI vehicle table: public.user_vehicles --------
+// Eslatma: agar jadval hali yaratib ulgurilmagan bo‘lsa,
+// “relation does not exist” bo‘lishi mumkin. Shuning uchun ehtiyotkor wrapper qilamiz.
+
+function isMissingTableError(e, tableName) {
+  const msg = (e && e.message) ? e.message : '';
+  return msg.toLowerCase().includes(tableName.toLowerCase()) && msg.toLowerCase().includes('does not exist');
+}
+
+exports.listUserVehiclesByUserId = async (userId) => {
+  const { data, error } = await supabase
+    .from('user_vehicles')
+    .select('*')
+    .eq('user_id', userId)
+    .order('is_primary', { ascending: false })
+    .order('created_at', { ascending: true });
+
+  if (error) {
+    if (isMissingTableError(error, 'user_vehicles')) return [];
+    throw error;
+  }
+  return data || [];
+};
+
+exports.getPrimaryUserVehicleByUserId = async (userId) => {
+  const { data, error } = await supabase
+    .from('user_vehicles')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('is_primary', true)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTableError(error, 'user_vehicles')) return null;
+    throw error;
+  }
+  return data || null;
+};
+
+exports.getUserVehicleById = async (userId, id) => {
+  const { data, error } = await supabase
+    .from('user_vehicles')
+    .select('*')
+    .eq('user_id', userId)
+    .eq('id', id)
+    .maybeSingle();
+
+  if (error) {
+    if (isMissingTableError(error, 'user_vehicles')) return null;
+    throw error;
+  }
+  return data || null;
+};
+
+exports.insertUserVehicle = async (dbRow) => {
+  const { data, error } = await supabase
+    .from('user_vehicles')
+    .insert(dbRow)
+    .select('*')
+    .single();
+
+  if (error) {
+    if (isMissingTableError(error, 'user_vehicles')) return null;
+    throw error;
+  }
+  return data;
+};
+
+exports.updateUserVehicleById = async (userId, id, patch) => {
+  const { data, error } = await supabase
+    .from('user_vehicles')
+    .update(patch)
+    .eq('user_id', userId)
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (error) {
+    if (isMissingTableError(error, 'user_vehicles')) return null;
+    throw error;
+  }
+  return data;
+};
+
+exports.deleteUserVehicleById = async (userId, id) => {
+  const { error } = await supabase
+    .from('user_vehicles')
+    .delete()
+    .eq('user_id', userId)
+    .eq('id', id);
+
+  if (error) {
+    if (isMissingTableError(error, 'user_vehicles')) return true;
+    throw error;
+  }
+  return true;
+};
+
+exports.clearPrimaryForUser = async (userId) => {
+  const { error } = await supabase
+    .from('user_vehicles')
+    .update({ is_primary: false, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('is_primary', true);
+
+  if (error) {
+    if (isMissingTableError(error, 'user_vehicles')) return true;
+    throw error;
+  }
+  return true;
+};
+
+exports.setPrimaryUserVehicle = async (userId, id) => {
+  // Minimal (2 query): avval eski primary’ni o‘chiramiz, keyin yangi primary qilamiz
+  await exports.clearPrimaryForUser(userId);
+  const { data, error } = await supabase
+    .from('user_vehicles')
+    .update({ is_primary: true, updated_at: new Date().toISOString() })
+    .eq('user_id', userId)
+    .eq('id', id)
+    .select('*')
+    .single();
+
+  if (error) {
+    if (isMissingTableError(error, 'user_vehicles')) return null;
+    throw error;
+  }
+  return data;
+};
+
+// -------- Unified getter (compat): birinchi primary user_vehicles, bo‘lmasa vehicles --------
+
+exports.getVehicleByUserId = async (userId) => {
+  // 1) multi jadvaldan primary
+  try {
+    const primary = await exports.getPrimaryUserVehicleByUserId(userId);
+    if (primary) return mapVehicle(primary);
+  } catch (e) {
+    // jadval yo‘q bo‘lsa / boshqa muammo bo‘lsa fallback
+  }
+
+  // 2) eski single jadval
+  return await getVehicleSingleByUserId(userId);
+};
+
+// -------- Helper: primary’ni upsert qilish (old endpointlar uchun sync) --------
+
+exports.upsertPrimaryUserVehicle = async (userId, dbRow) => {
+  try {
+    const current = await exports.getPrimaryUserVehicleByUserId(userId);
+    if (current?.id) {
+      return await exports.updateUserVehicleById(userId, current.id, {
+        ...dbRow,
+        is_primary: true,
+        updated_at: new Date().toISOString(),
+      });
+    }
+    // primary yo‘q bo‘lsa insert
+    return await exports.insertUserVehicle({
+      ...dbRow,
+      user_id: userId,
+      is_primary: true,
+      updated_at: new Date().toISOString(),
+    });
+  } catch (e) {
+    // user_vehicles yo‘q bo‘lsa ignore (compat)
+    if (isMissingTableError(e, 'user_vehicles')) return null;
+    throw e;
+  }
+};
+
+exports.deletePrimaryUserVehicle = async (userId) => {
+  // primary’larni o‘chirib tashlaymiz (minimal)
+  const { error } = await supabase
+    .from('user_vehicles')
+    .delete()
+    .eq('user_id', userId)
+    .eq('is_primary', true);
+
+  if (error) {
+    if (isMissingTableError(error, 'user_vehicles')) return true;
+    throw error;
+  }
+  return true;
 };
