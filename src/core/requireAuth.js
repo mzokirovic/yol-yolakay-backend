@@ -41,6 +41,12 @@ module.exports = async function requireAuth(req, res, next) {
       });
     }
 
+
+    if ((process.env.DEBUG_AUTH || '').toLowerCase() === 'true') {
+      console.log("✅ requireAuth user.id:", data.user.id);
+    }
+
+
     req.user = data.user;
     next();
   } catch (e) {
