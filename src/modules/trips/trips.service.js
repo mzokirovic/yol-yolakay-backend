@@ -304,7 +304,7 @@ exports.createTrip = async (data, userId) => {
     distance_km: distanceKm,
     duration_min: durationMin,
 
-    meeting_point_id: fromLoc.pointId
+    meeting_point_id: fromLoc.pointId,
 
     from_region: (data.fromRegion || fromLoc.cityName || fromLoc.name || null),
     to_region: (data.toRegion || toLoc.cityName || toLoc.name || null),
