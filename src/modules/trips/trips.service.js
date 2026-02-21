@@ -5,6 +5,7 @@ const pricingService = require('./pricing.service');
 const profileService = require('../profile/profile.service');
 const supabase = require('../../core/db/supabase'); // ✅ kerak
 const notificationsService = require('../notifications/notifications.service');
+const routingService = require('../routing/routing.service');
 
 // --- HELPER FUNCTIONS ---
 
@@ -231,8 +232,14 @@ exports.createTrip = async (data, userId) => {
     throw new Error("O'tib ketgan vaqtga e'lon berib bo'lmaydi.");
   }
 
-  const distance = pricingService.calculateDistance(fromLoc.lat, fromLoc.lng, toLoc.lat, toLoc.lng);
-  const priceCalc = pricingService.calculateTripPrice(distance);
+    const { distanceKm, durationMin } = routingService.computeRouteMeta({
+      fromLat: fromLoc.lat,
+      fromLng: fromLoc.lng,
+      toLat: toLoc.lat,
+      toLng: toLoc.lng
+    });
+
+    const priceCalc = pricingService.calculateTripPrice(distanceKm);
 
   const priceCheck = pricingService.validatePrice(data.price, priceCalc);
   if (!priceCheck.valid) {
@@ -262,6 +269,9 @@ exports.createTrip = async (data, userId) => {
     start_lng: fromLoc.lng,
     end_lat: toLoc.lat,
     end_lng: toLoc.lng,
+
+    distance_km: distanceKm,
+    duration_min: durationMin,
 
     meeting_point_id: fromLoc.pointId
   };
