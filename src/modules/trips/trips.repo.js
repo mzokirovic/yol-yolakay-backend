@@ -45,8 +45,14 @@ exports.searchTrips = async ({ from, to, date, passengers }) => {
   // ✅ Faqat hozirdan keyingi safarlar (MVP)
   query = query.gte('departure_time', new Date().toISOString());
 
-  if (from) query = query.ilike('from_city', `%${from}%`);
-  if (to) query = query.ilike('to_city', `%${to}%`);
+  if (from) {
+    // ✅ Asosiy: from_region. Fallback: eski data uchun from_city
+    query = query.or(`from_region.ilike.%${from}%,from_city.ilike.%${from}%`);
+  }
+
+  if (to) {
+    query = query.or(`to_region.ilike.%${to}%,to_city.ilike.%${to}%`);
+  }
 
   const p = passengers ? parseInt(passengers, 10) : 0;
   if (p > 0) query = query.gte('available_seats', p);

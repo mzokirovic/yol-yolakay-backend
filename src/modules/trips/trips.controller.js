@@ -81,6 +81,9 @@ exports.publishTrip = async (req, res) => {
       toLat: b.toLat ?? b.end_lat,
       toLng: b.toLng ?? b.end_lng,
 
+      fromRegion: b.fromRegion ?? b.from_region ?? null,
+      toRegion: b.toRegion ?? b.to_region ?? null,
+
       date: b.date,
       time: b.time,
       price: Number(b.price),
