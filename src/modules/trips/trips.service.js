@@ -38,6 +38,23 @@ async function listBookedPassengerIds(tripId) {
   return uniqIds((data || []).map(x => x.holder_client_id));
 }
 
+
+async function listMyPassengerTripIds(userId) {
+  const { data, error } = await supabase
+    .from('trip_seats')
+    .select('trip_id')
+    .eq('holder_client_id', userId)
+    // ✅ pending ham ko‘rinsin (so‘rov bergan bo‘lsa ham)
+    .in('status', ['pending', 'booked']);
+
+  if (error) {
+    console.error("my passenger trip ids load error:", error.message);
+    return [];
+  }
+  return uniqIds((data || []).map(x => x.trip_id));
+}
+
+
 async function notifyBookedPassengers(tripId, title, body, type, data = {}) {
   const ids = await listBookedPassengerIds(tripId);
   if (!ids.length) return;
@@ -296,7 +313,43 @@ exports.searchTrips = async ({ from, to, date, passengers }) => {
 };
 
 exports.getUserTrips = async (userId) => {
-  return await repo.getUserTrips(userId);
+  // 1) Driver trips (repo orqali)
+  const r = await repo.getUserTrips(userId);
+  const driverTrips = Array.isArray(r) ? r : (r?.data || []);
+  if (r?.error) throw r.error;
+
+  // 2) Passenger trip ids (trip_seats orqali)
+  const passengerTripIds = await listMyPassengerTripIds(userId);
+
+  // 3) Passenger trips (trips jadvalidan)
+  let passengerTrips = [];
+  if (passengerTripIds.length) {
+    const { data, error } = await supabase
+      .from('trips')
+      .select('*')
+      .in('id', passengerTripIds);
+
+    if (error) throw error;
+    passengerTrips = data || [];
+  }
+
+  // 4) my_role ni backenddan beramiz (Android tablar 100% ishlaydi)
+  const driverDecor = (driverTrips || []).map(t => ({ ...t, my_role: 'driver' }));
+  const passengerDecor = (passengerTrips || []).map(t => ({ ...t, my_role: 'passenger' }));
+
+  // 5) dedupe: agar bir trip ikkala tomonda chiqsa (kamdan-kam), driver ustun
+  const map = new Map();
+  for (const t of passengerDecor) map.set(String(t.id), t);
+  for (const t of driverDecor) map.set(String(t.id), t);
+
+  // 6) sort: yangi/yaqin safarlar tepada
+  const out = Array.from(map.values()).sort((a, b) => {
+    const ta = new Date(a.departure_time || a.departureTime || 0).getTime();
+    const tb = new Date(b.departure_time || b.departureTime || 0).getTime();
+    return tb - ta;
+  });
+
+  return out;
 };
 
 // ✅ viewerId optional
