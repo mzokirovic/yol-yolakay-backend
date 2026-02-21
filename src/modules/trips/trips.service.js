@@ -7,6 +7,37 @@ const supabase = require('../../core/db/supabase'); // ✅ kerak
 const notificationsService = require('../notifications/notifications.service');
 const routingService = require('../routing/routing.service');
 
+
+function ensureRouteMeta(trip) {
+  if (!trip) return trip;
+
+  const hasKm = Number.isFinite(trip.distance_km);
+  const hasMin = Number.isFinite(trip.duration_min);
+  if (hasKm && hasMin) return trip;
+
+  const fromLat = Number(trip.start_lat);
+  const fromLng = Number(trip.start_lng);
+  const toLat = Number(trip.end_lat);
+  const toLng = Number(trip.end_lng);
+
+  if (![fromLat, fromLng, toLat, toLng].every(Number.isFinite)) return trip;
+
+  const { distanceKm, durationMin } = routingService.computeRouteMeta({
+    fromLat, fromLng, toLat, toLng
+  });
+
+  return {
+    ...trip,
+    distance_km: hasKm ? trip.distance_km : distanceKm,
+    duration_min: hasMin ? trip.duration_min : durationMin
+  };
+}
+
+function ensureRouteMetaList(list) {
+  return (list || []).map(ensureRouteMeta);
+}
+
+
 // --- HELPER FUNCTIONS ---
 
 async function notifyUser(userId, title, body, type, data = {}) {
@@ -296,13 +327,23 @@ exports.searchTrips = async ({ from, to, date, passengers }) => {
 };
 
 exports.getUserTrips = async (userId) => {
-  return await repo.getUserTrips(userId);
+  const out = await repo.getUserTrips(userId);
+
+  // ✅ MyTrips (driver+passenger) list’da meta yo‘q bo‘lsa ham, response’da hisoblab qo‘yamiz
+  if (out && out.data) {
+    out.data = ensureRouteMetaList(out.data);
+  }
+
+  return out;
 };
 
 // ✅ viewerId optional
 exports.getTripDetails = async (tripId, viewerId = null) => {
-  const { data: trip, error: e1 } = await repo.getTripById(tripId);
+  const { data: tripRaw, error: e1 } = await repo.getTripById(tripId);
   if (e1) throw e1;
+
+  // ✅ duration_min/distance_km yo‘q bo‘lsa ham, coords’dan hisoblab qo‘yamiz
+  const trip = ensureRouteMeta(tripRaw);
 
   const { data: seatsRaw, error: e2 } = await repo.getTripSeats(tripId);
   if (e2) throw e2;
