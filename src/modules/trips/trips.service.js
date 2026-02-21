@@ -324,8 +324,34 @@ exports.searchTrips = async ({ from, to, date, passengers }) => {
   const { data, error } = await repo.searchTrips({ from, to, date, passengers });
   if (error) throw error;
 
-  // ✅ eski trip'larda distance_km/duration_min bo'lmasa ham hisoblab beramiz
-  return ensureRouteMetaList(data);
+  const list = data || [];
+  if (!list.length) return list;
+
+  // repo.searchTrips select'i meta ustunlarini bermagan bo'lishi mumkin
+  // Shuning uchun 1 ta query bilan duration/distance/coords ni olib, listga qo'shamiz
+  const ids = [...new Set(list.map(t => t?.id).filter(x => x !== null && x !== undefined))];
+  if (!ids.length) return ensureRouteMetaList(list);
+
+  const { data: metas, error: eMeta } = await supabase
+    .from('trips')
+    .select('id, distance_km, duration_min, start_lat, start_lng, end_lat, end_lng')
+    .in('id', ids);
+
+  if (eMeta) {
+    console.error("searchTrips meta load error:", eMeta.message);
+    return ensureRouteMetaList(list);
+  }
+
+  const metaMap = {};
+  for (const m of metas || []) metaMap[String(m.id)] = m;
+
+  const merged = list.map(t => {
+    const m = metaMap[String(t.id)];
+    return m ? { ...t, ...m } : t;
+  });
+
+  // endi duration/distance yo'q bo'lsa, coords bo'lsa hisoblab beradi
+  return ensureRouteMetaList(merged);
 };
 
 exports.getUserTrips = async (userId) => {
