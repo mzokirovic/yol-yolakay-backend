@@ -323,7 +323,9 @@ exports.createTrip = async (data, userId) => {
 exports.searchTrips = async ({ from, to, date, passengers }) => {
   const { data, error } = await repo.searchTrips({ from, to, date, passengers });
   if (error) throw error;
-  return data;
+
+  // ✅ eski trip'larda distance_km/duration_min bo'lmasa ham hisoblab beramiz
+  return ensureRouteMetaList(data);
 };
 
 exports.getUserTrips = async (userId) => {
