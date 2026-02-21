@@ -70,8 +70,6 @@ exports.publishTrip = async (req, res) => {
     const userId = getUserId(req);
     const b = req.body || {};
 
-    console.log("🧾 publishTrip ENTER userId=", userId, "date=", b.date, "time=", b.time);
-
     const tripData = {
       fromLocation: b.fromLocation ?? b.from_city,
       toLocation: b.toLocation ?? b.to_city,
@@ -101,15 +99,6 @@ exports.publishTrip = async (req, res) => {
 
     const newTrip = await tripService.createTrip(tripData, userId);
 
-    console.log(
-      "🧾 publishTrip OK tripId=",
-      newTrip?.id,
-      "driver_id=",
-      newTrip?.driver_id ?? newTrip?.driverId,
-      "departure_time=",
-      newTrip?.departure_time ?? newTrip?.departureTime
-    );
-
     return res.status(201).json({
       success: true,
       message: "Safar e'lon qilindi!",
@@ -117,7 +106,6 @@ exports.publishTrip = async (req, res) => {
     });
   } catch (error) {
     const code = error.statusCode || 400;
-    console.log("❌ publishTrip ERROR:", error?.message);
     return res.status(code).json({ success: false, error: { message: error.message } });
   }
 };
@@ -136,21 +124,9 @@ exports.getMyTrips = async (req, res) => {
   try {
     const userId = getUserId(req);
     const out = await tripService.getUserTrips(userId);
-
-    if (out?.error) {
-      console.log("❌ getMyTrips repo error:", out.error?.message || out.error);
-      return res.status(500).json({
-        success: false,
-        error: { message: out.error?.message || "DB error" }
-      });
-    }
-
     const list = out?.data || [];
-    console.log("📦 getMyTrips userId=", userId, "count=", list.length);
-
     return res.status(200).json({ success: true, count: list.length, data: list });
   } catch (error) {
-    console.log("❌ getMyTrips ERROR:", error?.message);
     return res.status(500).json({ success: false, error: { message: error.message } });
   }
 };
