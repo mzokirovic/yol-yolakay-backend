@@ -21,6 +21,15 @@ function normalizeVehicleInput(patch) {
   return { make, model, color, plate, seats };
 }
 
+// ✅ Tilni normalizatsiya qilish (faqat uz/ru/en)
+function normalizeLanguage(code) {
+  const v = String(code || '').trim().toLowerCase();
+  if (v === 'uz') return 'uz';
+  if (v === 'ru') return 'ru';
+  if (v === 'en') return 'en';
+  return null;
+}
+
 exports.getOrCreateProfile = async (userId) => {
   const existing = await repo.getProfileByUserId(userId);
   if (existing) return existing;
@@ -37,12 +46,30 @@ exports.getOrCreateProfile = async (userId) => {
 exports.updateProfile = async (userId, patch) => {
   await exports.getOrCreateProfile(userId);
 
+  const p = patch || {};
   const dbPatch = { user_id: userId };
 
-  if (patch.displayName !== undefined) dbPatch.display_name = patch.displayName;
-  if (patch.phone !== undefined) dbPatch.phone = patch.phone;
-  if (patch.avatarUrl !== undefined) dbPatch.avatar_url = patch.avatarUrl;
-  if (patch.language !== undefined) dbPatch.language = patch.language;
+  // ✅ display_name NOT NULL: null/bo‘sh bo‘lsa update qilmaymiz
+  if (p.displayName !== undefined && p.displayName !== null) {
+    const dn = String(p.displayName).trim();
+    if (dn.length > 0) dbPatch.display_name = dn;
+  }
+
+  // ✅ phone nullable: null bo‘lsa ham ruxsat (tozalash uchun)
+  if (p.phone !== undefined) {
+    dbPatch.phone = p.phone ?? null;
+  }
+
+  // ✅ avatar_url nullable: null bo‘lsa ham ruxsat (tozalash uchun)
+  if (p.avatarUrl !== undefined) {
+    dbPatch.avatar_url = p.avatarUrl ?? null;
+  }
+
+  // ✅ language NOT NULL: null/invalid bo‘lsa update qilmaymiz
+  if (p.language !== undefined && p.language !== null) {
+    const lang = normalizeLanguage(p.language);
+    if (lang) dbPatch.language = lang;
+  }
 
   return await repo.upsertProfile(dbPatch);
 };
