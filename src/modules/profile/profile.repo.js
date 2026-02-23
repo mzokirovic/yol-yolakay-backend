@@ -39,6 +39,27 @@ exports.getProfileByUserId = async (userId) => {
 };
 
 exports.upsertProfile = async (dbProfile) => {
+  // ✅ MUHIM: Supabase upsert kelmagan fieldlarni ham NULL qilib yuborishi mumkin.
+  // Shuning uchun display_name NOT NULL bo'lsa:
+  // - update patchda display_name yo'q bo'lsa, DB dagi eski qiymatni saqlab qolamiz.
+  // - agar umuman profil bo'lmasa, "Guest" qo'yamiz.
+
+  // dbProfile: { user_id, display_name?, phone?, avatar_url?, language?, updated_at? }
+
+  // 1) display_name kelmagan bo'lsa, avval hozirgi profilni olib olamiz
+  if (dbProfile.display_name === undefined) {
+    const { data: existing, error: getErr } = await supabase
+      .from('profiles')
+      .select('display_name')
+      .eq('user_id', dbProfile.user_id)
+      .maybeSingle();
+
+    if (getErr) throw getErr;
+
+    dbProfile.display_name = existing?.display_name ?? "Guest";
+  }
+
+  // 2) Endi upsert xavfsiz: display_name hech qachon NULL bo'lmaydi
   const { data, error } = await supabase
     .from('profiles')
     .upsert(dbProfile, { onConflict: 'user_id' })
