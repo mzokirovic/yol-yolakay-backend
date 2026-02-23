@@ -77,7 +77,6 @@ exports.updateProfile = async (userId, patch) => {
 // -------- Compat single endpointlar --------
 
 exports.getVehicle = async (userId) => {
-  // repo ichida: primary user_vehicles -> bo‘lmasa vehicles
   return await repo.getVehicleByUserId(userId);
 };
 
@@ -86,7 +85,6 @@ exports.upsertVehicle = async (userId, patch) => {
 
   const v = normalizeVehicleInput(patch);
 
-  // 1) Eski vehicles jadval (hozirgi app shuni o‘qiydi)
   const dbVehicle = {
     user_id: userId,
     make: v.make,
@@ -99,7 +97,6 @@ exports.upsertVehicle = async (userId, patch) => {
 
   const saved = await repo.upsertVehicle(dbVehicle);
 
-  // 2) Multi jadvalga ham primary sifatida sync (jadval bo‘lmasa jim turadi)
   await repo.upsertPrimaryUserVehicle(userId, {
     make: v.make,
     model: v.model,
@@ -112,12 +109,8 @@ exports.upsertVehicle = async (userId, patch) => {
 };
 
 exports.deleteVehicle = async (userId) => {
-  // 1) eski jadvaldan o‘chiramiz
   await repo.deleteVehicleByUserId(userId);
-
-  // 2) multi jadvalda primary ham o‘chsin (compat)
   await repo.deletePrimaryUserVehicle(userId);
-
   return true;
 };
 
@@ -162,7 +155,6 @@ exports.addVehicle = async (userId, patch) => {
     updated_at: new Date().toISOString(),
   });
 
-  // Agar primary bo‘lsa, eski vehicles jadvalni ham shu bilan sync qilamiz (app uchun)
   if (wantPrimary && inserted) {
     await repo.upsertVehicle({
       user_id: userId,
@@ -179,7 +171,6 @@ exports.addVehicle = async (userId, patch) => {
 };
 
 exports.updateVehicleById = async (userId, id, patch) => {
-  // patch: make/model/color/plate/seats/isPrimary bo‘lishi mumkin
   const current = await repo.getUserVehicleById(userId, id);
   if (!current) throw badRequest("vehicle topilmadi");
 
@@ -208,7 +199,6 @@ exports.updateVehicleById = async (userId, id, patch) => {
     updated_at: new Date().toISOString(),
   });
 
-  // Agar yangilangan vehicle primary bo‘lsa (yoki oldin primary bo‘lgan bo‘lsa) — eski jadvalni sync qilamiz
   const primary = await repo.getPrimaryUserVehicleByUserId(userId);
   if (primary) {
     await repo.upsertVehicle({
@@ -235,10 +225,9 @@ exports.deleteVehicleById = async (userId, id) => {
 
   if (wasPrimary) {
     const left = await repo.listUserVehiclesByUserId(userId);
-    const next = left[0]; // is_primary desc bo‘yicha sort bo‘lgani uchun 0-chi “eng yaqin”
+    const next = left[0];
     if (next?.id) {
       await repo.setPrimaryUserVehicle(userId, next.id);
-      // eski jadvalni sync
       await repo.upsertVehicle({
         user_id: userId,
         make: next.make,
@@ -249,7 +238,6 @@ exports.deleteVehicleById = async (userId, id) => {
         updated_at: new Date().toISOString(),
       });
     } else {
-      // hech narsa qolmadi -> eski jadvalni ham o‘chirib yuboramiz
       await repo.deleteVehicleByUserId(userId);
     }
   }
@@ -261,7 +249,6 @@ exports.setPrimaryVehicle = async (userId, id) => {
   const updated = await repo.setPrimaryUserVehicle(userId, id);
   if (!updated) throw badRequest("vehicle topilmadi");
 
-  // eski jadvalni sync (app uchun)
   await repo.upsertVehicle({
     user_id: userId,
     make: updated.make,
