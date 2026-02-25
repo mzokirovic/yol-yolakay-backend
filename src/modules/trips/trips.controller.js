@@ -1,7 +1,9 @@
 // src/modules/trips/trips.controller.js
 const tripService = require('./trips.service');
 const pricingService = require('./pricing.service');
+const routingService = require('../routing/routing.service');
 const supabase = require('../../core/db/supabase');
+
 
 function getUserId(req) {
   const uid = req.user?.id;
@@ -49,6 +51,23 @@ exports.calculatePricePreview = async (req, res) => {
       return res.status(mapErrorStatus(e)).json({ success: false, error: { message: e.message } });
     }
 };
+
+
+exports.calculateRoutePreview = async (req, res) => {
+  try {
+    const { fromLat, fromLng, toLat, toLng } = req.body || {};
+    if ([fromLat, fromLng, toLat, toLng].some(isNil)) {
+      return res.status(400).json({ success: false, error: { message: "Coords required" } });
+    }
+
+    const out = await routingService.getRoutePreview({ fromLat, fromLng, toLat, toLng });
+    return res.status(200).json({ success: true, ...out });
+  } catch (e) {
+    return res.status(500).json({ success: false, error: { message: e.message } });
+  }
+};
+
+
 
 exports.getPopularPoints = async (req, res) => {
   try {

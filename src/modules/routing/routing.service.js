@@ -52,3 +52,47 @@ exports.computeRouteMeta = ({ fromLat, fromLng, toLat, toLng }) => {
     lineKm: Number(lineKm.toFixed(1))
   };
 };
+
+
+async function fetchOsrmRoute({ fromLat, fromLng, toLat, toLng }) {
+  const url =
+    `https://router.project-osrm.org/route/v1/driving/` +
+    `${fromLng},${fromLat};${toLng},${toLat}` +
+    `?overview=full&geometries=polyline&alternatives=false&steps=false`;
+
+  const ac = new AbortController();
+  const t = setTimeout(() => ac.abort(), 4500);
+
+  try {
+    const resp = await fetch(url, { signal: ac.signal });
+    if (!resp.ok) throw new Error(`OSRM HTTP ${resp.status}`);
+    const json = await resp.json();
+
+    const r = json?.routes?.[0];
+    if (!r?.geometry) throw new Error("OSRM geometry yo'q");
+
+    return {
+      provider: "osrm",
+      polyline: r.geometry, // ✅ encoded polyline (precision=5)
+      distanceKm: Math.max(1, Math.round((r.distance || 0) / 1000)),
+      durationMin: Math.max(1, Math.round((r.duration || 0) / 60)),
+    };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+exports.getRoutePreview = async ({ fromLat, fromLng, toLat, toLng }) => {
+  try {
+    return await fetchOsrmRoute({ fromLat, fromLng, toLat, toLng });
+  } catch (e) {
+    const { distanceKm, durationMin } = exports.computeRouteMeta({ fromLat, fromLng, toLat, toLng });
+    return {
+      provider: "approx",
+      polyline: null,
+      distanceKm,
+      durationMin,
+      error: e.message,
+    };
+  }
+};

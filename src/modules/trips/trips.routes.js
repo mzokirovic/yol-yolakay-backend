@@ -7,6 +7,7 @@ const optionalAuth = require('../../core/optionalAuth');
 
 // Public
 router.post('/calculate-price', controller.calculatePricePreview);
+router.post('/calculate-route', controller.calculateRoutePreview);
 router.get('/search', controller.searchTrips);
 router.get('/points', controller.getPopularPoints);
 
